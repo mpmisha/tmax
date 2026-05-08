@@ -624,8 +624,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     // only a tail row (matches as a bare filename - which then fails to open
     // because the drive/folders are missing).
     //
-    // No hard-newline stitch here - paths, unlike URLs from `gh auth login`,
-    // do not get hard-wrapped by CLIs at fixed column counts.
+    // TASK-132: Also stitches across hard newlines, since Ink-based TUIs
+    // (Claude Code, Copilot CLI) wrap paths at their content width without
+    // setting `isWrapped`. Same seam check the image-path provider uses:
+    // prev row last char must be path-body, next row first non-WS char must
+    // be path-body.
     term.registerLinkProvider({
       provideLinks(bufferLineNumber, callback) {
         const buf = term.buffer.active;
@@ -646,7 +649,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         }
 
         const cols = term.cols;
-        interface Seg { rowIdx: number; logicalStart: number }
+        // Soft-wrap segs are cols-wide (no trim) except the last; hard-stitched
+        // segs are variable-width (trimmed) and may have leading whitespace
+        // we stripped to keep the seam test honest.
+        interface Seg { rowIdx: number; logicalStart: number; soft: boolean; leadingWS: number }
         const segs: Seg[] = [];
         let logical = '';
         for (let i = softStart; i <= softEnd; i++) {
@@ -656,8 +662,60 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
           // reverse offset->col math stays simple modulo. The trailing row
           // is the only one that may not be cols-wide - trim it.
           const text = i < softEnd ? line.translateToString(false) : line.translateToString(true);
-          segs.push({ rowIdx: i, logicalStart: logical.length });
+          segs.push({ rowIdx: i, logicalStart: logical.length, soft: true, leadingWS: 0 });
           logical += text;
+        }
+
+        // TASK-132 hard-newline stitch (TUI rewrap, no isWrapped flag). Mirrors
+        // the image-path provider's seam logic: PATH_BODY on both sides, capped
+        // at 4 rows so a screen full of path-shaped tokens can't glue together.
+        const PATH_BODY = /[A-Za-z0-9._\-+~/\\]/;
+        const MAX_HARD_NEWLINE = 4;
+        let stitchedFwd = 0;
+        while (stitchedFwd < MAX_HARD_NEWLINE) {
+          const lastSeg = segs[segs.length - 1];
+          if (!lastSeg) break;
+          const nextRow = lastSeg.rowIdx + 1;
+          if (nextRow >= buf.length) break;
+          const next = buf.getLine(nextRow);
+          if (!next || next.isWrapped) break;
+          if (/\s$/.test(logical)) break;
+          const lastCh = logical.charAt(logical.length - 1);
+          if (!PATH_BODY.test(lastCh)) break;
+          const nextRaw = next.translateToString(true);
+          if (!nextRaw) break;
+          const wsMatch = nextRaw.match(/^(\s*)(\S+)/);
+          if (!wsMatch) break;
+          const headCh = wsMatch[2].charAt(0);
+          if (!PATH_BODY.test(headCh)) break;
+          const trimmed = nextRaw.replace(/^\s+/, '');
+          // TASK-132: paths with literal embedded spaces (e.g. `OneDrive -
+          // Microsoft\...`) survive the wrap iff Ink kept the space on the
+          // post-wrap side as leading whitespace. Restore one seam space so
+          // the stitched path keeps the on-disk spelling.
+          const seamSpace = wsMatch[1].length > 0 ? ' ' : '';
+          segs.push({ rowIdx: nextRow, logicalStart: logical.length + seamSpace.length, soft: false, leadingWS: wsMatch[1].length - seamSpace.length });
+          logical += seamSpace + trimmed;
+          stitchedFwd++;
+        }
+        let stitchedBack = 0;
+        while (stitchedBack < MAX_HARD_NEWLINE) {
+          const firstSeg = segs[0];
+          if (!firstSeg) break;
+          const prevRow = firstSeg.rowIdx - 1;
+          if (prevRow < 0) break;
+          const prev = buf.getLine(prevRow);
+          if (!prev) break;
+          const prevText = prev.translateToString(true);
+          if (!prevText || /\s$/.test(prevText)) break;
+          const lastCh = prevText.charAt(prevText.length - 1);
+          if (!PATH_BODY.test(lastCh)) break;
+          const headOfCur = logical.replace(/^\s+/, '').charAt(0);
+          if (!PATH_BODY.test(headOfCur)) break;
+          for (const s of segs) s.logicalStart += prevText.length;
+          segs.unshift({ rowIdx: prevRow, logicalStart: 0, soft: false, leadingWS: 0 });
+          logical = prevText + logical;
+          stitchedBack++;
         }
 
         function offsetToRowCol(offset: number): { row: number; col: number } {
@@ -665,10 +723,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
             const seg = segs[s];
             if (offset >= seg.logicalStart) {
               const within = offset - seg.logicalStart;
-              if (s < segs.length - 1 && within >= cols) {
+              if (seg.soft && within >= cols) {
                 return { row: seg.rowIdx + Math.floor(within / cols), col: within % cols };
               }
-              return { row: seg.rowIdx, col: within };
+              return { row: seg.rowIdx, col: within + seg.leadingWS };
             }
           }
           return { row: segs[0]?.rowIdx ?? 0, col: 0 };
