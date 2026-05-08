@@ -321,16 +321,20 @@ const StatusBar: React.FC = () => {
   // right after focusing a non-AI pane and have to wait 30s for it to roll.
   useEffect(() => { setTipIndex(0); }, [eligibleTips.length, !!focusedAiSession]);
   const currentTip = eligibleTips.length > 0 ? eligibleTips[tipIndex % eligibleTips.length] : null;
-  // Scope the terminal count to the active workspace so it matches what the
-  // user actually sees. Same pattern as the Ctrl+P switcher fix in TASK-138.
+  // In workspaces tab mode, scope the count to the active workspace so it
+  // matches what the user sees on screen (same pattern as TASK-138's Ctrl+P
+  // switcher). In flat tab mode, every terminal is its own visible tab so
+  // the global count is the right number.
   const activeWorkspaceId = useTerminalStore((s) => s.activeWorkspaceId);
+  const tabMode = (config as unknown as { tabMode?: 'flat' | 'workspaces' } | undefined)?.tabMode ?? 'workspaces';
   const totalCount = React.useMemo(() => {
+    if (tabMode === 'flat') return terminals.size;
     let n = 0;
     for (const [, t] of terminals) {
       if ((t as { workspaceId?: string }).workspaceId === activeWorkspaceId) n++;
     }
     return n;
-  }, [terminals, activeWorkspaceId]);
+  }, [terminals, activeWorkspaceId, tabMode]);
   const tiledCount = layout.tilingRoot ? getLeafOrder(layout.tilingRoot).length : 0;
   const floatingCount = layout.floatingPanels.length;
 
