@@ -5550,24 +5550,31 @@ select.settings-input {
    Subtle peripheral-vision cue when any AI session is waiting for the
    user AND the tmax window is unfocused. Triggered by adding the
    .shimmer-active class to .app-shell from App.tsx. CSS-only so it
-   works across Windows / Mac / Linux without platform window APIs. */
+   works across Windows / Mac / Linux without platform window APIs.
+   Renders via a fixed-position overlay pseudo-element so it sits
+   above all panes (an inset box-shadow on .app-shell would get
+   covered by pane backgrounds that fill the container). */
 @keyframes ai-shimmer-pulse {
-  0%, 100% {
-    box-shadow: inset 0 0 0 1px transparent;
-  }
-  50% {
-    box-shadow: inset 0 0 0 2px var(--focus-border, #89b4fa),
-                inset 0 0 18px rgba(137, 180, 250, 0.35);
-  }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 
-.app-shell.shimmer-active {
+.app-shell.shimmer-active::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  border: 2px solid var(--focus-border, #89b4fa);
+  box-shadow: 0 0 24px var(--focus-border, #89b4fa),
+              inset 0 0 28px rgba(137, 180, 250, 0.45);
   animation: ai-shimmer-pulse 2.4s ease-in-out infinite;
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-shell.shimmer-active {
+  .app-shell.shimmer-active::after {
     animation: none;
-    box-shadow: inset 0 0 0 2px var(--focus-border, #89b4fa);
+    opacity: 1;
   }
 }
