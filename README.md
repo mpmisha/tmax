@@ -21,6 +21,14 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Status indicators per pane (green = active, grey = idle, red = error)
 - Focused pane highlighted with green-tinted title bar
 
+**Workspaces**
+- A tab is a workspace - each one keeps its own panes, layout, and color tint
+- Switch workspaces from the workspace tab bar; per-workspace state is saved across restarts
+- Multi-select panes (Ctrl+click / Cmd+click on a pane title bar) to act on several at once - "Show Selected (N)" toolbar button plus Command Palette entries (Show Selected Panes / Show All Panes / Clear Pane Selection)
+- Move a pane to another workspace from the pane ⋯ menu or the Command Palette - PTY, cwd, and scrollback survive the move
+- Per-workspace color tint with a colorize toggle that paints the workspace tab and its pane title bars
+- Focus-mode pane indicator: a row of dots at the bottom of the focused pane shows the pane count and lets you click to switch (Ctrl+Tab still works for power users)
+
 **Grid View Mode**
 - Toggle between Focus (single terminal) and Grid layout (`Ctrl+Shift+F`)
 - Grid auto-arranges terminals: 2x2, 3x2, etc. based on terminal count
@@ -39,9 +47,10 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Shows session status, summary, branch, repo, message/tool counts, and relative time
 - Click a session to resume it directly in a new terminal pane
 - Jump to any previous prompt in the terminal (`Ctrl+Shift+K`)
-- Filter tabs: All / Copilot / Claude Code
-- Search across sessions by name, branch, cwd, or summary
-- Desktop notifications when a Copilot session needs approval or input
+- Cross-session prompt search (`Ctrl+Shift+Y`) - search every prompt across every AI session; results stream in progressively, with a jump glyph (↗ for live panes, ↑ for inactive sessions) on each row. Inactive sessions resume in a new pane on click
+- Filter tabs: All / Copilot / Claude Code; sidebar search by name, branch, cwd, or summary
+- Native AI session notifications when Claude Code or Copilot CLI finishes a turn or asks for approval
+- Bulk Cleanup sessions - archive everything below a prompt-count threshold (pinned and already-archived sessions are skipped)
 - WSL session discovery — sessions from WSL distros appear with a distro badge
 
 **File Explorer**
@@ -60,10 +69,16 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - File tree with filter search
 - Inline code review with annotations
 
+**Click-to-Preview**
+- Click any `.md` path in terminal output to open an in-app markdown preview - rendered headings, mermaid diagrams, zoom, drag-to-resize, and a Friendly/Raw toggle
+- Click any image path (`.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`) to open an in-app image viewer with zoom and drag-to-resize. Works for absolute, relative, and bare-basename paths (Copilot CLI's `[basename.png]` shape resolves too)
+- Both previews have an "Open externally" button if you'd rather route to the OS default viewer
+
 **Keyboard-Driven Workflow**
 - Command palette (`Ctrl+Shift+P`) with every action searchable
 - Jump to any terminal by name (`Ctrl+Shift+G`)
 - Pane hints for quick terminal switching (`Ctrl+Shift+J`)
+- Undo close pane / workspace (`Ctrl+Shift+T`) - 10-deep stack that restores cwd, title, color, and resumes the AI session if it's still in the live list. Confirms before restoring so an accidental keypress doesn't spawn PTYs unexpectedly
 - Split, move, resize, and navigate — all from the keyboard
 - Every shortcut is fully configurable
 - macOS support: all Ctrl shortcuts work with Cmd, UI shows native symbols (⌘/⌥)
