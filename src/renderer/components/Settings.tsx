@@ -95,20 +95,98 @@ function useAvailableFonts(): string[] {
   return available;
 }
 
+function eventToAccelerator(e: KeyboardEvent): string | null {
+  const k = e.key;
+  if (['Control', 'Shift', 'Alt', 'Meta', 'OS', 'Hyper', 'Super'].includes(k)) return null;
+
+  const parts: string[] = [];
+  if (e.ctrlKey || e.metaKey) parts.push('CommandOrControl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+
+  let key: string | null = null;
+  if (k === ' ') key = 'Space';
+  else if (k === 'Enter') key = 'Return';
+  else if (k === 'ArrowUp') key = 'Up';
+  else if (k === 'ArrowDown') key = 'Down';
+  else if (k === 'ArrowLeft') key = 'Left';
+  else if (k === 'ArrowRight') key = 'Right';
+  else if (k === '+') key = 'Plus';
+  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(k)) key = k;
+  else if (/^[a-zA-Z]$/.test(k)) key = k.toUpperCase();
+  else if (k.length === 1) key = k;
+  else if (['Tab', 'Backspace', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown'].includes(k)) key = k;
+
+  if (!key) return null;
+  parts.push(key);
+  return parts.join('+');
+}
+
+function displayAccelerator(s: string): string {
+  if (!s) return 'Disabled';
+  const parts = s.split('+').map((p) => {
+    if (p === 'CommandOrControl' || p === 'CmdOrCtrl') return isMac ? '⌘' : 'Ctrl';
+    if (p === 'Command' || p === 'Cmd' || p === 'Meta' || p === 'Super') return isMac ? '⌘' : 'Win';
+    if (p === 'Control' || p === 'Ctrl') return 'Ctrl';
+    if (p === 'Alt' || p === 'Option') return isMac ? '⌥' : 'Alt';
+    if (p === 'Shift') return isMac ? '⇧' : 'Shift';
+    if (p === 'Return') return 'Enter';
+    return p;
+  });
+  return parts.join(isMac ? '' : '+');
+}
+
+const HotkeyCapture: React.FC<{
+  value: string;
+  defaultValue: string;
+  onChange: (v: string) => void;
+}> = ({ value, defaultValue, onChange }) => {
+  const [recording, setRecording] = useState(false);
+
+  useEffect(() => {
+    if (!recording) return;
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { setRecording(false); return; }
+      const accel = eventToAccelerator(e);
+      if (accel) {
+        onChange(accel);
+        setRecording(false);
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [recording, onChange]);
+
+  return (
+    <div className="hotkey-capture">
+      <button
+        type="button"
+        className={`keybinding-key${recording ? ' recording' : ''}`}
+        onClick={() => setRecording(true)}>
+        {recording ? 'Press keys... (Esc to cancel)' : displayAccelerator(value)}
+      </button>
+      {!recording && value && (
+        <button type="button" className="hotkey-capture-action" title="Disable" onClick={() => onChange('')}>
+          ×
+        </button>
+      )}
+      {!recording && value !== defaultValue && (
+        <button type="button" className="hotkey-capture-action" title="Reset to default" onClick={() => onChange(defaultValue)}>
+          ↺
+        </button>
+      )}
+    </div>
+  );
+};
+
 const TerminalSettings: React.FC = () => {
   const config = useTerminalStore((s) => s.config)!;
   const update = useTerminalStore((s) => s.updateConfig);
 
   return (
     <div className="settings-section">
-      <SettingRow label="Smart unwrap on copy" description="Stitch CLI-rendered hard newlines + indent continuations back into single paragraphs when copying. Skips code blocks, bullets, and headings.">
-        <label className="toggle-switch">
-          <input type="checkbox"
-            checked={config.terminal.smartUnwrapCopy !== false}
-            onChange={(e) => update({ terminal: { ...config.terminal, smartUnwrapCopy: e.target.checked } })} />
-          <span className="toggle-track" />
-        </label>
-      </SettingRow>
       <SettingRow label="Default Shell" description="Shell used for new terminals">
         <select className="settings-input" value={config.defaultShellId}
           onChange={(e) => update({ defaultShellId: e.target.value })}>
@@ -138,7 +216,7 @@ const TerminalSettings: React.FC = () => {
           <span className="toggle-track" />
         </label>
       </SettingRow>
-      <SettingRow label="AI session shimmer" description="Subtly pulse the tmax window border when an AI session is waiting for your input and the window is in the background. Useful as a peripheral cue on a multi-monitor setup.">
+      <SettingRow label="AI session shimmer" description="Subtly pulse the border of any pane whose AI session is waiting for your input, unless that pane is the one you're currently in. Useful as a peripheral cue when you're on another pane or another window.">
         <label className="toggle-switch">
           <input type="checkbox"
             checked={(config as any).aiShimmerEnabled !== false}
@@ -159,10 +237,11 @@ const TerminalSettings: React.FC = () => {
         <input type="number" className="settings-input small" value={(config as any).oldSessionDays ?? 30}
           onChange={(e) => update({ oldSessionDays: parseInt(e.target.value) || 30 } as any)} />
       </SettingRow>
-      <SettingRow label="Show-Window Hotkey" description="Global shortcut that restores and focuses tmax from anywhere. Takes effect on next launch. Empty = disabled.">
-        <input type="text" className="settings-input" value={(config as any).showWindowHotkey ?? 'CommandOrControl+Shift+Space'}
-          placeholder="CommandOrControl+Shift+Space"
-          onChange={(e) => update({ showWindowHotkey: e.target.value } as any)} />
+      <SettingRow label="Show-Window Hotkey" description="Global shortcut that restores and focuses tmax from anywhere. Takes effect on next launch.">
+        <HotkeyCapture
+          value={(config as any).showWindowHotkey ?? 'CommandOrControl+Shift+Space'}
+          defaultValue="CommandOrControl+Shift+Space"
+          onChange={(v) => update({ showWindowHotkey: v } as any)} />
       </SettingRow>
     </div>
   );

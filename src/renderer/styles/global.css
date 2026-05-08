@@ -3433,6 +3433,28 @@ select.settings-input {
   50% { opacity: 0.5; }
 }
 
+.hotkey-capture {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hotkey-capture-action {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.hotkey-capture-action:hover {
+  border-color: var(--focus-border);
+  color: var(--text-primary);
+}
+
 /* Shells */
 .shell-card {
   background: var(--bg-primary);
