@@ -2020,6 +2020,19 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   // Keep ref in sync for use in closure
   useEffect(() => { processStatusRef.current = processStatus; }, [processStatus]);
 
+  // Ctrl+Shift+R targets the focused pane's title bar inline-rename instead
+  // of (or in addition to) the tab bar. Mirror the global renamingTerminalId
+  // flag onto local isRenamingPane when it matches us, then clear the global
+  // flag so the tab bar / floating overlay don't ALSO render an input for
+  // the same terminal at the same time.
+  const renamingTerminalId = useTerminalStore((s) => s.renamingTerminalId);
+  useEffect(() => {
+    if (renamingTerminalId !== terminalId) return;
+    setRenameValue(useTerminalStore.getState().terminals.get(terminalId)?.title || '');
+    setIsRenamingPane(true);
+    useTerminalStore.getState().startRenaming(null);
+  }, [renamingTerminalId, terminalId]);
+
   // Process status: detect idle after 3s of no substantial output
   useEffect(() => {
     let lastBytes = 0;
