@@ -5,11 +5,17 @@ const TerminalSwitcher: React.FC = () => {
   const show = useTerminalStore((s) => s.showSwitcher);
   const terminals = useTerminalStore((s) => s.terminals);
   const focusedId = useTerminalStore((s) => s.focusedTerminalId);
+  const activeWorkspaceId = useTerminalStore((s) => s.activeWorkspaceId);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const entries = useMemo(() => Array.from(terminals.entries()), [terminals]);
+  const entries = useMemo(
+    () => Array.from(terminals.entries()).filter(
+      ([, t]) => (t.workspaceId ?? activeWorkspaceId) === activeWorkspaceId,
+    ),
+    [terminals, activeWorkspaceId],
+  );
 
   const filtered = useMemo(() => {
     if (!query) return entries;
