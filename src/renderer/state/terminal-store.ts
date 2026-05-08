@@ -3477,11 +3477,21 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         eligible.push(id);
       }
       if (eligible.length > 0) {
-        // Prefer the focused terminal when it's eligible - that's almost
-        // always the one the user just typed `ag` / `claude` / `ghcp` in.
-        candidateId = focusedTerminalId && eligible.includes(focusedTerminalId)
+        // Two-stage preference. Stage 1: panes whose firstCommandTitle is
+        // set are evidence the user actually typed *something* there - they
+        // are far more likely to be the pane that just launched the AI than
+        // a freshly-spawned sibling pane in the same cwd. The original
+        // focused-pane heuristic backfired when a user opens a second pane
+        // in the same cwd while the first is still booting an AI: focus
+        // moves to the fresh pane and it steals the link, contaminating
+        // its title + last-prompt bar + (now) shimmer with the wrong
+        // session's data. Stage 2: among the preferred set (or the full
+        // eligible set if nothing has firstCommandTitle), prefer focused.
+        const preferred = eligible.filter((id) => terminals.get(id)?.firstCommandTitle);
+        const pool = preferred.length > 0 ? preferred : eligible;
+        candidateId = focusedTerminalId && pool.includes(focusedTerminalId)
           ? focusedTerminalId
-          : eligible[0];
+          : pool[0];
       }
     }
 
