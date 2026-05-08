@@ -40,11 +40,37 @@ const config: ForgeConfig = {
       const napiDest = path.join(appDir, 'node_modules', 'node-addon-api');
       if (fs.existsSync(napiSrc)) await fs.copy(napiSrc, napiDest);
 
-      // chokidar is marked as external in vite.main.config.ts (native ESM),
-      // so it must be present in node_modules at runtime
-      const chokidarSrc = path.join(__dirname, 'node_modules', 'chokidar');
-      const chokidarDest = path.join(appDir, 'node_modules', 'chokidar');
-      if (fs.existsSync(chokidarSrc)) await fs.copy(chokidarSrc, chokidarDest);
+      // chokidar is marked as external in vite.main.config.ts, so it and
+      // its transitive deps must be present in node_modules at runtime.
+      // The static `import * as chokidar from 'chokidar'` in main resolves
+      // chokidar/index.js, which then `require()`s readdirp / anymatch /
+      // glob-parent / etc. Without these copied alongside, the packaged
+      // app crashes on launch with "Cannot find module 'readdirp'" (TASK-143).
+      const chokidarDeps = [
+        'chokidar',
+        // Direct deps from chokidar's package.json:
+        'anymatch',
+        'braces',
+        'glob-parent',
+        'is-binary-path',
+        'is-glob',
+        'normalize-path',
+        'readdirp',
+        // Transitive deps required by the above:
+        'binary-extensions',  // is-binary-path
+        'fill-range',         // braces
+        'is-extglob',         // is-glob, glob-parent
+        'is-number',          // fill-range
+        'picomatch',          // anymatch, readdirp
+        'to-regex-range',     // fill-range
+      ];
+      for (const dep of chokidarDeps) {
+        const depSrc = path.join(__dirname, 'node_modules', dep);
+        const depDest = path.join(appDir, 'node_modules', dep);
+        if (fs.existsSync(depSrc) && !fs.existsSync(depDest)) {
+          await fs.copy(depSrc, depDest);
+        }
+      }
 
       console.log(`Copied native/external modules to ${appDir}`);
     },
