@@ -4630,6 +4630,29 @@ select.settings-input {
   line-height: 1.4;
 }
 
+.ai-prompts-search-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.ai-prompts-search-row .dir-panel-search {
+  flex: 1;
+  padding-right: 80px;
+}
+
+.ai-prompts-count {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .ai-prompts-list {
   overflow-y: auto;
   flex: 1;

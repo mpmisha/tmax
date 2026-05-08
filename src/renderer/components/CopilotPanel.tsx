@@ -1220,9 +1220,25 @@ const PromptsDialog: React.FC<{
   // Reverse to show newest first, then filter
   const reversed = useMemo(() => [...prompts].reverse(), [prompts]);
   const filtered = useMemo(() => {
-    if (!search.trim()) return reversed;
-    const q = search.toLowerCase();
-    return reversed.filter((p) => p.toLowerCase().includes(q));
+    const raw = search.trim();
+    if (!raw) return reversed;
+    // Split on case-insensitive 'AND' as a whole word; tolerate empty operands.
+    const tokens = raw
+      .split(/\bAND\b/i)
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length > 0);
+    if (tokens.length === 0) return reversed;
+    if (tokens.length === 1) {
+      const q = tokens[0];
+      return reversed.filter((p) => p.toLowerCase().includes(q));
+    }
+    return reversed.filter((p) => {
+      const lower = p.toLowerCase();
+      for (const t of tokens) {
+        if (!lower.includes(t)) return false;
+      }
+      return true;
+    });
   }, [reversed, search]);
 
   // Reset selection when filter changes
@@ -1287,15 +1303,22 @@ const PromptsDialog: React.FC<{
           <span title={title}>{title}</span>
           <button className="dir-panel-close" onClick={onClose}>&#10005;</button>
         </div>
-        <input
-          ref={searchRef}
-          className="dir-panel-search"
-          type="text"
-          placeholder="Search prompts..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
+        <div className="ai-prompts-search-row">
+          <input
+            ref={searchRef}
+            className="dir-panel-search"
+            type="text"
+            placeholder="Search prompts (use AND to combine terms)..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          {reversed.length > 0 && (
+            <span className="ai-prompts-count" aria-live="polite">
+              {filtered.length} of {reversed.length}
+            </span>
+          )}
+        </div>
         {jumpWarning && (
           <div className="ai-prompts-warning">{jumpWarning}</div>
         )}
