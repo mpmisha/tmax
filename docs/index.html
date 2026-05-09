@@ -378,14 +378,49 @@
       margin: 0 auto 60px;
       padding: 0 20px;
     }
-    .changelog h2 { font-size: 32px; text-align: center; margin-bottom: 12px; }
+    .changelog h2 { font-size: 32px; text-align: center; margin-bottom: 14px; }
     .changelog .release-cadence {
-      text-align: center;
-      color: var(--fg2);
+      max-width: fit-content;
+      margin: 0 auto 22px;
+      padding: 8px 14px;
+      border: 1px solid rgba(74,222,128,0.35);
+      background: rgba(74,222,128,0.07);
+      border-radius: 8px;
+      color: var(--fg);
       font-family: var(--mono);
-      font-size: 12px;
-      margin-bottom: 18px;
+      font-size: 13px;
       letter-spacing: 0.2px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .changelog .release-cadence::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px rgba(74,222,128,0.6);
+      animation: cadence-pulse 2.4s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .changelog .release-cadence .pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border: 1px solid rgba(74,222,128,0.5);
+      border-radius: 4px;
+      color: var(--green);
+      font-weight: 600;
+      letter-spacing: 0.4px;
+    }
+    @keyframes cadence-pulse {
+      0%, 100% { opacity: 0.6; transform: scale(1); }
+      50%      { opacity: 1; transform: scale(1.18); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .changelog .release-cadence::before { animation: none; opacity: 0.85; }
     }
     .changelog-content {
       background: var(--bg2);
@@ -828,7 +863,11 @@
 
 <div class="changelog" id="changelog">
   <h2><span class="sec-marker"><span class="sm-prompt">&gt;</span><span class="sm-cmd">tmax log</span></span>Changelog</h2>
-  <p class="release-cadence">New versions ship on Sundays. Bug-fix patches land mid-week as needed.</p>
+  <p class="release-cadence">
+    <span><span class="pill">SUN</span> new versions</span>
+    <span style="opacity:0.5;">·</span>
+    <span><span class="pill">mid-week</span> bug-fix patches as needed</span>
+  </p>
   <div class="changelog-content" id="changelog-content">Loading changelog...</div>
 </div>
 
