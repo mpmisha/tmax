@@ -59,7 +59,6 @@ const Tab: React.FC<TabProps> = ({
   const terminal = useTerminalStore((s) => s.terminals.get(terminalId));
   const isDormant = terminal?.mode === 'dormant';
   const isDetached = terminal?.mode === 'detached';
-  const isFloating = terminal?.mode === 'floating';
   const tabColor = terminal?.tabColor;
   const isSelected = useTerminalStore((s) => !!s.selectedTerminalIds[terminalId]);
   const isInGrid = useTerminalStore((s) => !!s.gridTabIds[terminalId]);
@@ -156,20 +155,6 @@ const Tab: React.FC<TabProps> = ({
         <>
           {isInGrid && viewMode === 'grid' && <span className="tab-split-dot" />}
           <span className="tab-title">{title}</span>
-          {isFloating && (
-            <span
-              className="tab-floating-indicator"
-              title="Floating pane"
-              aria-label="Floating pane"
-            >
-              <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="9,1 13,1 13,5" />
-                <line x1="13" y1="1" x2="9" y2="5" />
-                <polyline points="5,13 1,13 1,9" />
-                <line x1="1" y1="13" x2="5" y2="9" />
-              </svg>
-            </span>
-          )}
         </>
       )}
       {showCloseBtn && (
