@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTerminalStore, TAB_COLORS } from '../state/terminal-store';
@@ -21,6 +21,7 @@ interface WorkspaceTabProps {
   renameValue: string;
   renameInputRef: React.RefObject<HTMLInputElement>;
   showCloseBtn: boolean;
+  hasFloatingPane: boolean;
   onActivate: () => void;
   onMiddleClick: () => void;
   onDoubleClick: () => void;
@@ -40,6 +41,7 @@ const WorkspaceTab: React.FC<WorkspaceTabProps> = ({
   renameValue,
   renameInputRef,
   showCloseBtn,
+  hasFloatingPane,
   onActivate,
   onMiddleClick,
   onDoubleClick,
@@ -98,6 +100,20 @@ const WorkspaceTab: React.FC<WorkspaceTabProps> = ({
       ) : (
         <>
           <span className="workspace-tab-name">{ws.name}</span>
+          {hasFloatingPane && (
+            <span
+              className="workspace-tab-floating-indicator"
+              title="Floating pane"
+              aria-label="Workspace contains a floating pane"
+            >
+              <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="9,1 13,1 13,5" />
+                <line x1="13" y1="1" x2="9" y2="5" />
+                <polyline points="5,13 1,13 1,9" />
+                <line x1="1" y1="13" x2="5" y2="9" />
+              </svg>
+            </span>
+          )}
           {isActive && (
             <button
               className="workspace-tab-add-pane-inline"
@@ -132,6 +148,7 @@ const WorkspaceTab: React.FC<WorkspaceTabProps> = ({
 
 const WorkspaceTabBar: React.FC<{ vertical?: boolean; side?: 'left' | 'right' }> = ({ vertical }) => {
   const workspaces = useTerminalStore((s) => s.workspaces);
+  const terminals = useTerminalStore((s) => s.terminals);
   const activeWorkspaceId = useTerminalStore((s) => s.activeWorkspaceId);
   const setActiveWorkspace = useTerminalStore((s) => s.setActiveWorkspace);
   const createWorkspace = useTerminalStore((s) => s.createWorkspace);
@@ -228,6 +245,23 @@ const WorkspaceTabBar: React.FC<{ vertical?: boolean; side?: 'left' | 'right' }>
   const sortableIds = orderedIds.map((id) => WORKSPACE_SORT_PREFIX + id);
   const ctxWorkspace = ctxMenu ? workspaces.get(ctxMenu.id) : undefined;
 
+  // TASK-146: workspaces whose grid contains at least one floating pane get
+  // a visible indicator on their tab so users can spot floats without
+  // switching workspaces. Falls back to the active workspace for terminals
+  // whose workspaceId doesn't match any current workspace (matches the
+  // visibility logic used elsewhere in the store).
+  const floatingByWorkspace = useMemo(() => {
+    const set = new Set<WorkspaceId>();
+    for (const t of terminals.values()) {
+      if (t.mode !== 'floating') continue;
+      const wsId = t.workspaceId && workspaces.has(t.workspaceId)
+        ? t.workspaceId
+        : activeWorkspaceId;
+      set.add(wsId);
+    }
+    return set;
+  }, [terminals, workspaces, activeWorkspaceId]);
+
   return (
     <div className={`workspace-tab-bar${vertical ? ' vertical' : ''}`} role="tablist">
       <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
@@ -243,6 +277,7 @@ const WorkspaceTabBar: React.FC<{ vertical?: boolean; side?: 'left' | 'right' }>
               renameValue={renameValue}
               renameInputRef={renameInputRef}
               showCloseBtn={workspaces.size > 1}
+              hasFloatingPane={floatingByWorkspace.has(id)}
               onActivate={() => setActiveWorkspace(id)}
               onMiddleClick={() => handleClose(id)}
               onDoubleClick={() => {
