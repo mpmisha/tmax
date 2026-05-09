@@ -1,4 +1,8 @@
-/* ===== CSS Variables (Catppuccin Mocha inspired) ===== */
+/* ===== CSS Variables (Catppuccin Mocha inspired) =====
+   Theme presets (src/renderer/utils/theme-presets.ts) override these at
+   runtime so swapping themes recolors chrome AND accents app-wide. The
+   --rgb-* variants exist so rgba(var(--rgb-accent), 0.18) can compose
+   translucent overlays without each preset shipping its own rgba list. */
 :root {
   --bg-primary: #1e1e2e;
   --bg-secondary: #313244;
@@ -8,6 +12,15 @@
   --text-secondary: #a6adc8;
   --tab-bg: #313244;
   --tab-active: #45475a;
+  /* Semantic accents - override per preset for app-wide recolor */
+  --accent: #89b4fa;            /* primary action / focus / link */
+  --accent-success: #a6e3a1;    /* running, healthy */
+  --accent-warning: #f9e2af;    /* attention, paused */
+  --accent-danger: #f38ba8;     /* error, exited-error */
+  --rgb-accent: 137, 180, 250;
+  --rgb-accent-success: 166, 227, 161;
+  --rgb-accent-warning: 249, 226, 175;
+  --rgb-accent-danger: 243, 139, 168;
 }
 
 /* ===== Reset ===== */
@@ -180,16 +193,16 @@ html.transparency-active .input-dialog {
 
 .tab.needs-attention {
   animation: tab-attention 1.5s ease-in-out infinite;
-  box-shadow: inset 0 -2px 0 #f9e2af;
+  box-shadow: inset 0 -2px 0 var(--accent-warning);
 }
 
 .tab.ai-thinking {
-  box-shadow: inset 0 -2px 0 #89b4fa;
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 @keyframes tab-attention {
   0%, 100% { background: var(--tab-bg); }
-  50% { background: rgba(249, 226, 175, 0.2); }
+  50% { background: rgba(var(--rgb-accent-warning), 0.2); }
 }
 
 .tab .tab-title {
@@ -443,7 +456,7 @@ html.transparency-active .input-dialog {
 
 .tab-bar-resize:hover,
 .tab-bar.resizing .tab-bar-resize {
-  background: var(--accent-color, #89b4fa);
+  background: var(--accent-color, var(--accent));
   opacity: 0.5;
 }
 
@@ -523,7 +536,7 @@ html.transparency-active .input-dialog {
 }
 
 .terminal-panel.focused {
-  box-shadow: inset 0 0 0 1px rgba(137, 180, 250, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(var(--rgb-accent), 0.3);
 }
 
 /* TASK-72: Multi-select indicator. Distinct from .focused (which is a soft
@@ -531,22 +544,22 @@ html.transparency-active .input-dialog {
    can tell at a glance which panes are queued for "Show selected", even if
    one of them is also the currently focused pane. */
 .terminal-panel.multi-selected {
-  box-shadow: inset 0 0 0 2px rgba(249, 226, 175, 0.7);
+  box-shadow: inset 0 0 0 2px rgba(var(--rgb-accent-warning), 0.7);
 }
 .terminal-panel.focused.multi-selected {
   /* Layered: focused inner ring + multi-selected outer ring, so both
      states are visible at once on the active selected pane. */
   box-shadow:
-    inset 0 0 0 1px rgba(137, 180, 250, 0.5),
-    inset 0 0 0 3px rgba(249, 226, 175, 0.85);
+    inset 0 0 0 1px rgba(var(--rgb-accent), 0.5),
+    inset 0 0 0 3px rgba(var(--rgb-accent-warning), 0.85);
 }
 .terminal-pane-title.multi-selected {
   /* Subtle highlight on the chrome the user actually clicked, so the
      hit target itself shows feedback on top of the pane outline. */
   background: linear-gradient(
     to bottom,
-    rgba(249, 226, 175, 0.18),
-    rgba(249, 226, 175, 0.08)
+    rgba(var(--rgb-accent-warning), 0.18),
+    rgba(var(--rgb-accent-warning), 0.08)
   );
 }
 
@@ -575,8 +588,8 @@ html.transparency-active .input-dialog {
   transition: background 0.3s ease, opacity 0.15s ease;
 }
 
-.terminal-status-dot.active { background: #a6e3a1; }
-.terminal-status-dot.exited-error { background: #f38ba8; }
+.terminal-status-dot.active { background: var(--accent-success); }
+.terminal-status-dot.exited-error { background: var(--accent-danger); }
 .terminal-status-dot.exited-ok { background: #585b70; }
 .terminal-status-dot.idle { background: #585b70; }
 
@@ -594,7 +607,7 @@ html.transparency-active .input-dialog {
 }
 
 .status-dot-container:hover {
-  background: rgba(243, 139, 168, 0.2);
+  background: rgba(var(--rgb-accent-danger), 0.2);
 }
 
 .status-dot-container:hover .terminal-status-dot {
@@ -608,7 +621,7 @@ html.transparency-active .input-dialog {
   transform: translate(-50%, -50%);
   font-size: 10px;
   line-height: 1;
-  color: #f38ba8;
+  color: var(--accent-danger);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
@@ -633,9 +646,9 @@ html.transparency-active .input-dialog {
   flex: 1;
   min-width: 0;
   background: transparent;
-  border: 1px solid rgba(137, 180, 250, 0.5);
+  border: 1px solid rgba(var(--rgb-accent), 0.5);
   border-radius: 3px;
-  color: #f9e2af;
+  color: var(--accent-warning);
   font-size: 11px;
   font-weight: 600;
   padding: 0 4px;
@@ -645,7 +658,7 @@ html.transparency-active .input-dialog {
 }
 
 .pane-rename-input:focus {
-  border-color: #89b4fa;
+  border-color: var(--accent);
 }
 
 .terminal-panel:hover .terminal-pane-title {
@@ -717,10 +730,10 @@ html.transparency-active .input-dialog {
   transform: scale(1.2);
   box-shadow: 0 0 0 2px rgba(255,255,255,0.15);
 }
-.terminal-pane-status-thinking { background: #f9e2af; }
-.terminal-pane-status-executingTool { background: #89b4fa; }
-.terminal-pane-status-awaitingApproval { background: #f38ba8; }
-.terminal-pane-status-waitingForUser { background: #a6e3a1; }
+.terminal-pane-status-thinking { background: var(--accent-warning); }
+.terminal-pane-status-executingTool { background: var(--accent); }
+.terminal-pane-status-awaitingApproval { background: var(--accent-danger); }
+.terminal-pane-status-waitingForUser { background: var(--accent-success); }
 .terminal-pane-status-idle { background: #6c7086; }
 
 .terminal-pane-latest-prompt-jump {
@@ -823,9 +836,9 @@ html.transparency-active .input-dialog {
   letter-spacing: 0.6px;
   padding: 1px 5px;
   margin-right: 6px;
-  border: 1px solid rgba(137, 180, 250, 0.45);
-  background: rgba(137, 180, 250, 0.12);
-  color: #89b4fa;
+  border: 1px solid rgba(var(--rgb-accent), 0.45);
+  background: rgba(var(--rgb-accent), 0.12);
+  color: var(--accent);
   border-radius: 3px;
   user-select: none;
   pointer-events: auto;
@@ -868,7 +881,7 @@ html.transparency-active .input-dialog {
   opacity: 1 !important;
   color: var(--focus-border);
   border-color: var(--focus-border);
-  background: rgba(137, 180, 250, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
 }
 
 .terminal-pane-dormant-btn {
@@ -890,9 +903,9 @@ html.transparency-active .input-dialog {
 
 .terminal-pane-dormant-btn:hover {
   opacity: 1 !important;
-  color: #f9e2af;
-  border-color: #f9e2af;
-  background: rgba(249, 226, 175, 0.1);
+  color: var(--accent-warning);
+  border-color: var(--accent-warning);
+  background: rgba(var(--rgb-accent-warning), 0.1);
 }
 
 /* ── Terminal diagnostics overlay ─────────────────────────────────── */
@@ -919,7 +932,7 @@ html.transparency-active .input-dialog {
   align-items: center;
   font-weight: 600;
   margin-bottom: 6px;
-  color: #89b4fa;
+  color: var(--accent);
 }
 
 .terminal-diag-close {
@@ -956,8 +969,8 @@ html.transparency-active .input-dialog {
   padding-top: 6px !important;
 }
 
-.diag-ok { color: #a6e3a1; }
-.diag-warn { color: #f38ba8; font-weight: 600; }
+.diag-ok { color: var(--accent-success); }
+.diag-warn { color: var(--accent-danger); font-weight: 600; }
 
 .terminal-diag-logpath {
   display: flex;
@@ -1293,7 +1306,7 @@ html.transparency-active .input-dialog {
   transform: scale(1.2);
 }
 .focus-mode-pane-dot.active {
-  background: #89b4fa;
+  background: var(--accent);
   width: 18px;
   border-radius: 4px;
 }
@@ -1391,7 +1404,7 @@ html.transparency-active .input-dialog {
   font-size: 13px;
 }
 .dormant-popover-item:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 .dormant-popover-title {
   font-weight: 500;
@@ -1464,7 +1477,7 @@ html.transparency-active .input-dialog {
   font-family: inherit;
 }
 .terminal-list-popover-item:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 .terminal-list-popover-title {
   flex: 1 1 auto;
@@ -1486,9 +1499,9 @@ html.transparency-active .input-dialog {
   background: rgba(127, 127, 127, 0.08);
 }
 .terminal-list-popover-mode.mode-tiled {
-  color: #a6e3a1;
-  border-color: rgba(166, 227, 161, 0.45);
-  background: rgba(166, 227, 161, 0.10);
+  color: var(--accent-success);
+  border-color: rgba(var(--rgb-accent-success), 0.45);
+  background: rgba(var(--rgb-accent-success), 0.10);
 }
 .terminal-list-popover-mode.mode-floating {
   color: #cba6f7;
@@ -1500,9 +1513,9 @@ html.transparency-active .input-dialog {
   opacity: 0.85;
 }
 .terminal-list-popover-mode.mode-detached {
-  color: #f9e2af;
-  border-color: rgba(249, 226, 175, 0.45);
-  background: rgba(249, 226, 175, 0.10);
+  color: var(--accent-warning);
+  border-color: rgba(var(--rgb-accent-warning), 0.45);
+  background: rgba(var(--rgb-accent-warning), 0.10);
 }
 .terminal-list-popover-ai {
   flex: 0 0 auto;
@@ -1528,14 +1541,14 @@ html.transparency-active .input-dialog {
    - grey = idle  (default dot color above)
 */
 .terminal-list-popover-ai.ai-waitingForUser .terminal-list-popover-ai-dot {
-  background: #a6e3a1;
+  background: var(--accent-success);
 }
 .terminal-list-popover-ai.ai-awaitingApproval .terminal-list-popover-ai-dot {
-  background: #f9e2af;
+  background: var(--accent-warning);
 }
 .terminal-list-popover-ai.ai-thinking .terminal-list-popover-ai-dot,
 .terminal-list-popover-ai.ai-executingTool .terminal-list-popover-ai-dot {
-  background: #89b4fa;
+  background: var(--accent);
 }
 
 /* Status-bar overflow ⋯ menu - mirrors the dormant popover but right-anchored
@@ -1560,10 +1573,10 @@ html.transparency-active .input-dialog {
    only delta is the destructive Close action - tinted red on hover so
    users can spot it at the bottom of the menu without reading. */
 .pane-menu .pane-menu-danger:hover {
-  background: rgba(243, 139, 168, 0.18);
+  background: rgba(var(--rgb-accent-danger), 0.18);
 }
 .pane-menu .pane-menu-danger .dormant-popover-title {
-  color: var(--error, #f38ba8);
+  color: var(--error, var(--accent-danger));
 }
 
 /* Session summary popover - opened from the per-pane banner status icon
@@ -1670,7 +1683,7 @@ html.transparency-active .input-dialog {
 .session-summary-quote {
   margin: 0 0 6px;
   padding: 6px 10px;
-  border-left: 2px solid var(--focus-border, #89b4fa);
+  border-left: 2px solid var(--focus-border, var(--accent));
   background: rgba(255, 255, 255, 0.02);
   border-radius: 2px;
   color: var(--text-primary);
@@ -1717,24 +1730,24 @@ html.transparency-active .input-dialog {
 
 /* Active zone: solid colored preview showing where the split will go */
 .pane-drop-zone.zone-left.active {
-  background: rgba(137, 180, 250, 0.3);
+  background: rgba(var(--rgb-accent), 0.3);
   box-shadow: inset -3px 0 0 0 var(--focus-border);
 }
 .pane-drop-zone.zone-right.active {
-  background: rgba(137, 180, 250, 0.3);
+  background: rgba(var(--rgb-accent), 0.3);
   box-shadow: inset 3px 0 0 0 var(--focus-border);
 }
 .pane-drop-zone.zone-top.active {
-  background: rgba(137, 180, 250, 0.3);
+  background: rgba(var(--rgb-accent), 0.3);
   box-shadow: inset 0 -3px 0 0 var(--focus-border);
 }
 .pane-drop-zone.zone-bottom.active {
-  background: rgba(137, 180, 250, 0.3);
+  background: rgba(var(--rgb-accent), 0.3);
   box-shadow: inset 0 3px 0 0 var(--focus-border);
 }
 .pane-drop-zone.zone-center.active {
-  background: rgba(166, 227, 161, 0.2);
-  box-shadow: inset 0 0 0 2px #a6e3a1;
+  background: rgba(var(--rgb-accent-success), 0.2);
+  box-shadow: inset 0 0 0 2px var(--accent-success);
 }
 
 .drop-label {
@@ -1773,8 +1786,8 @@ html.transparency-active .input-dialog {
   left: 18px; bottom: 0; width: calc(100% - 36px); height: 18px;
 }
 .root-edge-zone.active {
-  background: rgba(166, 227, 161, 0.3);
-  box-shadow: inset 0 0 0 3px #a6e3a1;
+  background: rgba(var(--rgb-accent-success), 0.3);
+  box-shadow: inset 0 0 0 3px var(--accent-success);
 }
 
 /* ===== Global Float Drop Zone ===== */
@@ -1794,7 +1807,7 @@ html.transparency-active .input-dialog {
 }
 
 .drop-zone-float.active {
-  background: rgba(137, 180, 250, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
   border: 2px dashed var(--focus-border);
 }
 
@@ -1818,7 +1831,7 @@ html.transparency-active .input-dialog {
   height: 28px;
   border-radius: 50%;
   border: 2px solid var(--border-color, rgba(205, 214, 244, 0.18));
-  border-top-color: var(--accent, #89b4fa);
+  border-top-color: var(--accent, var(--accent));
   animation: session-loading-spin 0.8s linear infinite;
 }
 
@@ -2069,7 +2082,7 @@ html.transparency-active .input-dialog {
 }
 
 .context-menu-item:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 
 .context-menu-item.sub {
@@ -2082,11 +2095,11 @@ html.transparency-active .input-dialog {
 }
 
 .context-menu-item.danger {
-  color: #f38ba8;
+  color: var(--accent-danger);
 }
 
 .context-menu-item.danger:hover {
-  background: rgba(243, 139, 168, 0.15);
+  background: rgba(var(--rgb-accent-danger), 0.15);
 }
 
 .context-menu-item .shortcut {
@@ -2274,7 +2287,7 @@ html.transparency-active .input-dialog {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #a6e3a1;
+  background: var(--accent-success);
   flex-shrink: 0;
 }
 
@@ -2457,7 +2470,7 @@ html.transparency-active .input-dialog {
 }
 
 .app-dialog-btn-danger {
-  background: #f38ba8;
+  background: var(--accent-danger);
   color: #1e1e2e;
 }
 .app-dialog-btn-danger:hover {
@@ -2722,7 +2735,7 @@ html.transparency-active .input-dialog {
 
 .status-cwd:hover {
   color: var(--focus-border);
-  background: rgba(137, 180, 250, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
   text-decoration: underline;
 }
 
@@ -2739,27 +2752,27 @@ html.transparency-active .input-dialog {
 }
 
 .status-mode-btn:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
   color: var(--text-primary);
   border-color: var(--focus-border);
 }
 
 .status-mode-btn.status-broadcast-active {
-  background: rgba(243, 139, 168, 0.18);
-  border-color: rgba(243, 139, 168, 0.8);
-  color: #f38ba8;
+  background: rgba(var(--rgb-accent-danger), 0.18);
+  border-color: rgba(var(--rgb-accent-danger), 0.8);
+  color: var(--accent-danger);
   font-weight: 600;
 }
 
 .status-mode-btn.status-broadcast-active:hover {
-  background: rgba(243, 139, 168, 0.28);
+  background: rgba(var(--rgb-accent-danger), 0.28);
 }
 
 /* Broadcast mode pane indicator: when broadcast is on, mark all tiled panes
    with a subtle red outline so users can't miss that their keystrokes are
    going everywhere. */
 body.broadcast-on .terminal-panel {
-  box-shadow: inset 0 0 0 1px rgba(243, 139, 168, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(var(--rgb-accent-danger), 0.45);
 }
 
 .status-help-btn {
@@ -2779,7 +2792,7 @@ body.broadcast-on .terminal-panel {
 }
 
 .status-help-btn:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
   color: var(--text-primary);
   border-color: var(--focus-border);
 }
@@ -2860,7 +2873,7 @@ body.broadcast-on .terminal-panel {
 }
 
 .switcher-item.selected {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 
 .switcher-item.current .switcher-title {
@@ -2925,7 +2938,7 @@ body.broadcast-on .terminal-panel {
 .prompt-search-item.selected .prompt-search-jump,
 .prompt-search-item:hover .prompt-search-jump {
   opacity: 1;
-  color: var(--focus-border, #89b4fa);
+  color: var(--focus-border, var(--accent));
   transform: translateX(2px);
 }
 .prompt-search-item:last-child {
@@ -2952,7 +2965,7 @@ body.broadcast-on .terminal-panel {
   flex-wrap: wrap;
 }
 .prompt-search-meta .prompt-search-pane {
-  color: var(--focus-border, #89b4fa);
+  color: var(--focus-border, var(--accent));
 }
 .prompt-search-meta .prompt-search-folder {
   color: var(--text-secondary);
@@ -2968,7 +2981,7 @@ body.broadcast-on .terminal-panel {
   font-weight: 400;
 }
 .prompt-search-mark {
-  background: rgba(249, 226, 175, 0.35);
+  background: rgba(var(--rgb-accent-warning), 0.35);
   color: var(--text-primary);
   border-radius: 2px;
   padding: 0 1px;
@@ -2991,7 +3004,7 @@ body.broadcast-on .terminal-panel {
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: var(--focus-border, #89b4fa);
+  background: var(--focus-border, var(--accent));
   color: var(--bg-primary, #1e1e2e);
   font-size: 24px;
   font-weight: 700;
@@ -3032,7 +3045,7 @@ body.broadcast-on .terminal-panel {
 
 .dir-panel-resize:hover,
 .dir-panel.resizing .dir-panel-resize {
-  background: var(--accent-color, #89b4fa);
+  background: var(--accent-color, var(--accent));
   opacity: 0.5;
 }
 
@@ -3113,7 +3126,7 @@ body.broadcast-on .terminal-panel {
 
 .dir-panel-item:hover,
 .dir-panel-item.selected {
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
   border-left-color: var(--focus-border);
 }
 
@@ -3215,7 +3228,7 @@ body.broadcast-on .terminal-panel {
 .dir-star {
   cursor: pointer;
   font-size: 14px;
-  color: #f9e2af;
+  color: var(--accent-warning);
   flex-shrink: 0;
   width: 20px;
   text-align: center;
@@ -3283,8 +3296,8 @@ body.broadcast-on .terminal-panel {
 }
 
 .dir-remove-btn:hover {
-  color: #f38ba8;
-  background: rgba(243, 139, 168, 0.15);
+  color: var(--accent-danger);
+  background: rgba(var(--rgb-accent-danger), 0.15);
 }
 
 .dir-hint {
@@ -3534,7 +3547,7 @@ select.settings-input {
 }
 
 .font-dropdown-item:hover {
-  background: rgba(137, 180, 250, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
 }
 
 /* Keybindings */
@@ -3575,8 +3588,8 @@ select.settings-input {
 }
 
 .keybinding-key.recording {
-  border-color: #f38ba8;
-  color: #f38ba8;
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
   animation: pulse 1s infinite;
 }
 
@@ -3630,7 +3643,7 @@ select.settings-input {
 .shell-remove {
   background: transparent;
   border: none;
-  color: #f38ba8;
+  color: var(--accent-danger);
   cursor: pointer;
   font-size: 14px;
   padding: 2px 6px;
@@ -3638,7 +3651,7 @@ select.settings-input {
 }
 
 .shell-remove:hover {
-  background: rgba(243, 139, 168, 0.15);
+  background: rgba(var(--rgb-accent-danger), 0.15);
 }
 
 .settings-add-btn {
@@ -3791,7 +3804,7 @@ select.settings-input {
 }
 
 .file-explorer-nav-btn:hover {
-  background: rgba(137, 180, 250, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
   color: var(--text-primary);
 }
 
@@ -3807,7 +3820,7 @@ select.settings-input {
 }
 
 .file-explorer-breadcrumbs:hover {
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
 }
 
 .file-explorer-crumb {
@@ -3864,11 +3877,11 @@ select.settings-input {
 }
 
 .file-entry:hover {
-  background: rgba(137, 180, 250, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
 }
 
 .file-entry.previewing {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
   color: var(--focus-border);
 }
 
@@ -3907,20 +3920,20 @@ select.settings-input {
 .file-type-icon.tsx::before { content: 'TS'; font-size: 8px; font-weight: 700; color: #3178c6; }
 .file-type-icon.js::before,
 .file-type-icon.jsx::before { content: 'JS'; font-size: 8px; font-weight: 700; color: #f7df1e; }
-.file-type-icon.json::before { content: '{}'; font-size: 9px; font-weight: 600; color: #f9e2af; }
-.file-type-icon.css::before { content: '#'; font-size: 11px; font-weight: 700; color: #89b4fa; }
+.file-type-icon.json::before { content: '{}'; font-size: 9px; font-weight: 600; color: var(--accent-warning); }
+.file-type-icon.css::before { content: '#'; font-size: 11px; font-weight: 700; color: var(--accent); }
 .file-type-icon.html::before { content: '<>'; font-size: 9px; font-weight: 600; color: #fab387; }
 .file-type-icon.md::before { content: 'M'; font-size: 10px; font-weight: 700; color: #a6adc8; }
 .file-type-icon.py::before { content: '\1F40D'; font-size: 11px; }
 .file-type-icon.sh::before,
-.file-type-icon.bash::before { content: '$'; font-size: 11px; font-weight: 700; color: #a6e3a1; }
+.file-type-icon.bash::before { content: '$'; font-size: 11px; font-weight: 700; color: var(--accent-success); }
 .file-type-icon.yml::before,
-.file-type-icon.yaml::before { content: 'Y'; font-size: 10px; font-weight: 700; color: #f38ba8; }
+.file-type-icon.yaml::before { content: 'Y'; font-size: 10px; font-weight: 700; color: var(--accent-danger); }
 .file-type-icon.png::before,
 .file-type-icon.jpg::before,
 .file-type-icon.svg::before,
 .file-type-icon.ico::before { content: '\1F5BC'; font-size: 11px; }
-.file-type-icon.git::before { content: '\2B24'; font-size: 8px; color: #f38ba8; }
+.file-type-icon.git::before { content: '\2B24'; font-size: 8px; color: var(--accent-danger); }
 .file-type-icon.lock::before { content: '\1F512'; font-size: 11px; }
 .file-type-icon.default::before { content: '\25CB'; font-size: 9px; color: var(--text-secondary); }
 
@@ -3933,7 +3946,7 @@ select.settings-input {
   flex: 1;
   min-width: 0;
   padding: 1px 4px;
-  border: 1px solid var(--accent-color, #89b4fa);
+  border: 1px solid var(--accent-color, var(--accent));
   border-radius: 3px;
   background: var(--bg-primary, #1e1e2e);
   color: var(--text-primary);
@@ -4210,7 +4223,7 @@ select.settings-input {
   margin: 1em 0;
   padding: 0.5em 1em;
   color: var(--text-secondary);
-  background: rgba(137, 180, 250, 0.05);
+  background: rgba(var(--rgb-accent), 0.05);
 }
 
 .md-rendered-content table {
@@ -4330,7 +4343,7 @@ select.settings-input {
 
 .input-dialog-option:hover,
 .input-dialog-option.selected {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 
 .input-dialog-option.empty {
@@ -4427,7 +4440,7 @@ select.settings-input {
 }
 
 .palette-item.selected {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 
 .palette-label {
@@ -4581,12 +4594,12 @@ select.settings-input {
 }
 
 .ai-session-tab:hover {
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
   color: var(--text-primary);
 }
 
 .ai-session-tab.active {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
   color: var(--focus-border);
   font-weight: 500;
 }
@@ -4609,7 +4622,7 @@ select.settings-input {
   color: var(--dim-text, #a6adc8);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(137, 180, 250, 0.04);
+  background: rgba(var(--rgb-accent), 0.04);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
@@ -4620,7 +4633,7 @@ select.settings-input {
 }
 
 .ai-session-group-header:hover {
-  background: rgba(137, 180, 250, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
 }
 
 .ai-session-group-header:first-child {
@@ -4666,7 +4679,7 @@ select.settings-input {
 }
 
 .ai-session-item:hover {
-  background: rgba(137, 180, 250, 0.05);
+  background: rgba(var(--rgb-accent), 0.05);
 }
 
 /* TASK-51: keyboard-cursor row needs to be visibly distinct from hover BUT
@@ -4682,7 +4695,7 @@ select.settings-input {
 }
 
 .ai-session-item.multi-selected {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
   border-left-color: var(--focus-border);
 }
 
@@ -4699,12 +4712,12 @@ select.settings-input {
    Uses a stronger background + a left rail so the indicator survives
    hover/selected styling on other rows. */
 .ai-session-item.pane-active {
-  background: rgba(137, 180, 250, 0.18);
+  background: rgba(var(--rgb-accent), 0.18);
   box-shadow: inset 3px 0 0 0 var(--focus-border);
 }
 .ai-session-item.pane-active:hover,
 .ai-session-item.pane-active.selected {
-  background: rgba(137, 180, 250, 0.22);
+  background: rgba(var(--rgb-accent), 0.22);
 }
 
 /* Status dot */
@@ -4769,8 +4782,8 @@ select.settings-input {
   font-size: 9px;
   padding: 0 4px;
   border-radius: 3px;
-  color: #a6e3a1;
-  background: rgba(166, 227, 161, 0.15);
+  color: var(--accent-success);
+  background: rgba(var(--rgb-accent-success), 0.15);
   font-weight: 600;
   letter-spacing: 0.3px;
   flex-shrink: 0;
@@ -4780,8 +4793,8 @@ select.settings-input {
   font-size: 9px;
   padding: 0 4px;
   border-radius: 3px;
-  color: #f9e2af;
-  background: rgba(249, 226, 175, 0.15);
+  color: var(--accent-warning);
+  background: rgba(var(--rgb-accent-warning), 0.15);
   font-weight: 600;
   letter-spacing: 0.3px;
   flex-shrink: 0;
@@ -4837,8 +4850,8 @@ select.settings-input {
 }
 
 .ai-provider-badge[data-provider="copilot"] {
-  color: #89b4fa;
-  background: rgba(137, 180, 250, 0.12);
+  color: var(--accent);
+  background: rgba(var(--rgb-accent), 0.12);
 }
 
 .ai-provider-badge[data-provider="claude-code"] {
@@ -4849,7 +4862,7 @@ select.settings-input {
 .ai-branch-badge {
   font-size: 10px;
   color: var(--focus-border);
-  background: rgba(137, 180, 250, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
   padding: 1px 5px;
   border-radius: 3px;
   white-space: nowrap;
@@ -4889,10 +4902,10 @@ select.settings-input {
 .ai-prompts-warning {
   margin: 0 14px 8px;
   padding: 8px 10px;
-  background: rgba(243, 139, 168, 0.12);
-  border: 1px solid rgba(243, 139, 168, 0.4);
+  background: rgba(var(--rgb-accent-danger), 0.12);
+  border: 1px solid rgba(var(--rgb-accent-danger), 0.4);
   border-radius: 4px;
-  color: #f38ba8;
+  color: var(--accent-danger);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -4939,11 +4952,11 @@ select.settings-input {
 
 .ai-prompt-item:hover,
 .ai-prompt-item.selected {
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
 }
 
 .ai-prompt-item.selected {
-  background: rgba(137, 180, 250, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
 }
 
 .ai-prompt-index {
@@ -5046,7 +5059,7 @@ select.settings-input {
 }
 
 .ai-filter-button:hover {
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
   color: var(--text-primary);
 }
 
@@ -5091,7 +5104,7 @@ select.settings-input {
 }
 
 .ai-filter-option:hover {
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
   color: var(--text-primary);
 }
 
@@ -5126,11 +5139,11 @@ select.settings-input {
 }
 
 .ai-session-complete-btn {
-  color: #a6e3a1;
+  color: var(--accent-success);
 }
 
 .ai-session-complete-btn:hover {
-  background: rgba(166, 227, 161, 0.15);
+  background: rgba(var(--rgb-accent-success), 0.15);
 }
 
 /* Pin button sits to the left of the complete/reactivate button. Stays
@@ -5143,15 +5156,15 @@ select.settings-input {
   opacity: 1;
 }
 .ai-session-pin-btn:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 
 .ai-session-reactivate-btn {
-  color: #89b4fa;
+  color: var(--accent);
 }
 
 .ai-session-reactivate-btn:hover {
-  background: rgba(137, 180, 250, 0.15);
+  background: rgba(var(--rgb-accent), 0.15);
 }
 
 /* ── Toast Notifications ────────────────────────────────────────────── */
@@ -5281,7 +5294,7 @@ select.settings-input {
 
 .wt-panel-resize:hover,
 .wt-panel.resizing .wt-panel-resize {
-  background: var(--accent-color, #89b4fa);
+  background: var(--accent-color, var(--accent));
   opacity: 0.5;
 }
 
@@ -5356,7 +5369,7 @@ select.settings-input {
 }
 
 .wt-repo-header:hover {
-  background: rgba(137, 180, 250, 0.06);
+  background: rgba(var(--rgb-accent), 0.06);
 }
 
 .wt-repo-chevron {
@@ -5397,7 +5410,7 @@ select.settings-input {
   border-radius: 4px;
   font-size: 12px;
   border: 1px solid var(--border-color);
-  border-left: 3px solid var(--accent-color, #89b4fa);
+  border-left: 3px solid var(--accent-color, var(--accent));
   transition: border-color 0.2s ease;
 }
 
@@ -5412,7 +5425,7 @@ select.settings-input {
 }
 
 .wt-worktree-branch {
-  color: var(--accent-color, #89b4fa);
+  color: var(--accent-color, var(--accent));
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 12px;
 }
@@ -5458,7 +5471,7 @@ select.settings-input {
 .wt-action-btn:hover {
   color: var(--text-primary);
   border-color: var(--focus-border);
-  background: rgba(137, 180, 250, 0.08);
+  background: rgba(var(--rgb-accent), 0.08);
 }
 
 .wt-action-danger:hover {
@@ -5468,7 +5481,7 @@ select.settings-input {
 }
 
 .wt-action-primary {
-  background: var(--accent-color, #89b4fa);
+  background: var(--accent-color, var(--accent));
   color: var(--bg-primary);
   border-color: transparent;
   font-weight: 600;
@@ -5476,7 +5489,7 @@ select.settings-input {
 
 .wt-action-primary:hover {
   opacity: 0.9;
-  background: var(--accent-color, #89b4fa);
+  background: var(--accent-color, var(--accent));
   color: var(--bg-primary);
 }
 
@@ -5618,12 +5631,12 @@ select.settings-input {
   opacity: 1;
 }
 .workspace-tab-close:hover {
-  background: rgba(243, 139, 168, 0.18);
-  color: #f38ba8;
+  background: rgba(var(--rgb-accent-danger), 0.18);
+  color: var(--accent-danger);
 }
 .workspace-tab-rename {
   background: var(--bg);
-  border: 1px solid var(--focus-border, #89b4fa);
+  border: 1px solid var(--focus-border, var(--accent));
   border-radius: 3px;
   color: var(--text-primary);
   font-size: 12.5px;
@@ -5686,23 +5699,23 @@ select.settings-input {
   margin-right: 6px;
   padding: 0;
   border-radius: 12px;
-  border: 1px solid rgba(249, 226, 175, 0.45);
-  background: rgba(249, 226, 175, 0.08);
-  color: #f9e2af;
+  border: 1px solid rgba(var(--rgb-accent-warning), 0.45);
+  background: rgba(var(--rgb-accent-warning), 0.08);
+  color: var(--accent-warning);
   font-size: 11.5px;
   white-space: nowrap;
   flex-shrink: 0;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .workspace-show-selected:hover {
-  background: rgba(249, 226, 175, 0.16);
-  border-color: rgba(249, 226, 175, 0.7);
+  background: rgba(var(--rgb-accent-warning), 0.16);
+  border-color: rgba(var(--rgb-accent-warning), 0.7);
 }
 .workspace-show-selected.active {
-  background: rgba(249, 226, 175, 0.22);
-  border-color: rgba(249, 226, 175, 0.85);
+  background: rgba(var(--rgb-accent-warning), 0.22);
+  border-color: rgba(var(--rgb-accent-warning), 0.85);
   color: #fff7d8;
-  box-shadow: 0 0 0 1px rgba(249, 226, 175, 0.35);
+  box-shadow: 0 0 0 1px rgba(var(--rgb-accent-warning), 0.35);
 }
 .workspace-show-selected-btn {
   display: inline-flex;
@@ -5719,25 +5732,25 @@ select.settings-input {
   letter-spacing: 0.2px;
 }
 .workspace-show-selected-btn:focus-visible {
-  outline: 1px solid rgba(249, 226, 175, 0.9);
+  outline: 1px solid rgba(var(--rgb-accent-warning), 0.9);
   outline-offset: -2px;
 }
 .workspace-show-selected-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #f9e2af;
-  box-shadow: 0 0 4px rgba(249, 226, 175, 0.6);
+  background: var(--accent-warning);
+  box-shadow: 0 0 4px rgba(var(--rgb-accent-warning), 0.6);
   flex-shrink: 0;
 }
 .workspace-show-selected.active .workspace-show-selected-dot {
   background: #fff7d8;
-  box-shadow: 0 0 6px rgba(249, 226, 175, 0.9);
+  box-shadow: 0 0 6px rgba(var(--rgb-accent-warning), 0.9);
 }
 .workspace-show-selected-clear {
   background: transparent;
   border: none;
-  border-left: 1px solid rgba(249, 226, 175, 0.3);
+  border-left: 1px solid rgba(var(--rgb-accent-warning), 0.3);
   color: inherit;
   cursor: pointer;
   font-size: 14px;
@@ -5749,7 +5762,7 @@ select.settings-input {
   transition: background 0.12s ease, opacity 0.12s ease;
 }
 .workspace-show-selected-clear:hover {
-  background: rgba(249, 226, 175, 0.18);
+  background: rgba(var(--rgb-accent-warning), 0.18);
   opacity: 1;
 }
 /* Vertical layout: stack the button below the workspace chips, matching the
@@ -5785,10 +5798,10 @@ select.settings-input {
   /* Outer glow gets clipped by .terminal-panel's overflow:hidden, so all
      the visual weight sits inside: thicker accent border + a strong inset
      glow that fades the inner edge, producing a clearly visible pulse. */
-  border: 3px solid var(--focus-border, #89b4fa);
+  border: 3px solid var(--focus-border, var(--accent));
   border-radius: inherit;
-  box-shadow: inset 0 0 36px rgba(137, 180, 250, 0.7),
-              inset 0 0 0 1px rgba(137, 180, 250, 0.9);
+  box-shadow: inset 0 0 36px rgba(var(--rgb-accent), 0.7),
+              inset 0 0 0 1px rgba(var(--rgb-accent), 0.9);
   animation: ai-shimmer-pulse 2.4s ease-in-out infinite;
   opacity: 0;
 }

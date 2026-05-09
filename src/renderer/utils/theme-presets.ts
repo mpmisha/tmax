@@ -30,6 +30,14 @@ const CATPPUCCIN_CHROME: Record<string, string> = {
   '--text-secondary': '#a6adc8',
   '--tab-bg': '#313244',
   '--tab-active': '#45475a',
+  '--accent': '#89b4fa',
+  '--accent-success': '#a6e3a1',
+  '--accent-warning': '#f9e2af',
+  '--accent-danger': '#f38ba8',
+  '--rgb-accent': '137, 180, 250',
+  '--rgb-accent-success': '166, 227, 161',
+  '--rgb-accent-warning': '249, 226, 175',
+  '--rgb-accent-danger': '243, 139, 168',
 };
 
 const WARM_DUSK_CHROME: Record<string, string> = {
@@ -41,6 +49,14 @@ const WARM_DUSK_CHROME: Record<string, string> = {
   '--text-secondary': '#8a96b0',
   '--tab-bg': '#1c2438',
   '--tab-active': '#3a2e3e',
+  '--accent': '#ee6c4d',
+  '--accent-success': '#7ec1bb',
+  '--accent-warning': '#f4a261',
+  '--accent-danger': '#ff6b6b',
+  '--rgb-accent': '238, 108, 77',
+  '--rgb-accent-success': '126, 193, 187',
+  '--rgb-accent-warning': '244, 162, 97',
+  '--rgb-accent-danger': '255, 107, 107',
 };
 
 export const THEME_PRESETS: ThemePreset[] = [
