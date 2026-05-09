@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { useTerminalStore } from '../state/terminal-store';
 import { getLeafOrder } from '../state/terminal-store';
 import { formatKeyForPlatform, isDev } from '../utils/platform';
 import InputDialog from './InputDialog';
+import type { TerminalInstance } from '../state/types';
+import type { CopilotSessionStatus, CopilotSessionSummary } from '../../shared/copilot-types';
 
 interface UpdateInfoState {
   status: string;
@@ -181,6 +184,101 @@ const ChangelogModal: React.FC<{ content: string; loading: boolean; onClose: () 
   );
 };
 
+// TASK-145: popover that lists every terminal in the current scope (active
+// workspace, or all in flat mode) when the user clicks the terminal-count
+// label in the status bar. Each row shows the title, a mode pill, and an AI
+// session status dot when the pane is linked to a Copilot/Claude Code session.
+// Clicking a row focuses that terminal and dismisses the popover.
+const AI_STATUS_LABEL: Record<CopilotSessionStatus, string> = {
+  idle: 'idle',
+  thinking: 'thinking',
+  executingTool: 'executing tool',
+  awaitingApproval: 'awaiting approval',
+  waitingForUser: 'waiting for user',
+};
+
+interface TerminalListEntry {
+  id: string;
+  terminal: TerminalInstance;
+  aiStatus: CopilotSessionStatus | null;
+}
+
+interface TerminalListPopoverProps {
+  entries: TerminalListEntry[];
+  anchor: { right: number; bottom: number } | null;
+  onClose: () => void;
+}
+
+const TerminalListPopover: React.FC<TerminalListPopoverProps> = ({ entries, anchor, onClose }) => {
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click + Escape. Escape uses capture so xterm.js doesn't
+  // swallow it first - same pattern used by TabContextMenu.
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey, true);
+    };
+  }, [onClose]);
+
+  return ReactDOM.createPortal(
+    <div
+      ref={popoverRef}
+      className="terminal-list-popover"
+      onClick={(e) => e.stopPropagation()}
+      style={anchor ? {
+        left: 'auto',
+        bottom: anchor.bottom,
+        right: anchor.right,
+      } : undefined}
+    >
+      <div className="terminal-list-popover-header">
+        <span>Terminals ({entries.length})</span>
+      </div>
+      {entries.length === 0 ? (
+        <div className="terminal-list-popover-empty">No terminals</div>
+      ) : (
+        entries.map(({ id, terminal, aiStatus }) => (
+          <button
+            key={id}
+            type="button"
+            className="terminal-list-popover-item"
+            onClick={() => {
+              useTerminalStore.getState().setFocus(id);
+              onClose();
+            }}
+            title={terminal.cwd || terminal.title}
+          >
+            <span className="terminal-list-popover-title">{terminal.title || 'Untitled'}</span>
+            <span className={`terminal-list-popover-mode mode-${terminal.mode}`}>{terminal.mode}</span>
+            {aiStatus && (
+              <span className={`terminal-list-popover-ai ai-${aiStatus}`} title={`AI: ${AI_STATUS_LABEL[aiStatus]}`}>
+                <span className="terminal-list-popover-ai-dot" />
+                {AI_STATUS_LABEL[aiStatus]}
+              </span>
+            )}
+          </button>
+        ))
+      )}
+    </div>,
+    document.body,
+  );
+};
+
 const StatusBar: React.FC = () => {
   const [appVersion, setAppVersion] = useState<string>('');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfoState | null>(null);
@@ -260,6 +358,10 @@ const StatusBar: React.FC = () => {
   // Anchor for the dormant popover - so it opens directly above the
   // 👁 hidden button no matter where in the footer the button sits.
   const [dormantPopoverAnchor, setDormantPopoverAnchor] = useState<{ right: number; bottom: number } | null>(null);
+  // TASK-145: popover that lists every terminal in scope (workspace-aware)
+  // with mode + AI status. Anchored above the terminal-count button.
+  const [terminalListOpen, setTerminalListOpen] = useState(false);
+  const [terminalListAnchor, setTerminalListAnchor] = useState<{ right: number; bottom: number } | null>(null);
   // Overflow menu for low-traffic footer items (Colors, Logs, Report).
   // Keeps the status bar from growing every time we add a new tool.
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -337,6 +439,27 @@ const StatusBar: React.FC = () => {
   }, [terminals, activeWorkspaceId, tabMode]);
   const tiledCount = layout.tilingRoot ? getLeafOrder(layout.tilingRoot).length : 0;
   const floatingCount = layout.floatingPanels.length;
+
+  // TASK-145: terminals visible in the popover. Mirror the count's
+  // workspace-awareness: in flat tab mode every terminal is its own tab so
+  // the global list is right; in workspaces mode show only the active one
+  // (keeps the list aligned with what the user sees on screen).
+  const copilotSessions = useTerminalStore((s) => s.copilotSessions);
+  const claudeCodeSessions = useTerminalStore((s) => s.claudeCodeSessions);
+  const terminalListEntries = React.useMemo<TerminalListEntry[]>(() => {
+    const findStatus = (aiSessionId: string | undefined): CopilotSessionStatus | null => {
+      if (!aiSessionId) return null;
+      const found = copilotSessions.find((s: CopilotSessionSummary) => s.id === aiSessionId)
+        || claudeCodeSessions.find((s: CopilotSessionSummary) => s.id === aiSessionId);
+      return found ? found.status : null;
+    };
+    const out: TerminalListEntry[] = [];
+    for (const [id, t] of terminals) {
+      if (tabMode !== 'flat' && (t as { workspaceId?: string }).workspaceId !== activeWorkspaceId) continue;
+      out.push({ id, terminal: t, aiStatus: findStatus(t.aiSessionId) });
+    }
+    return out;
+  }, [terminals, tabMode, activeWorkspaceId, copilotSessions, claudeCodeSessions]);
 
   return (
     <>
@@ -430,10 +553,30 @@ const StatusBar: React.FC = () => {
               &#128227; Broadcast ON
             </button>
           )}
-          <span className="status-dim">
+          <button
+            type="button"
+            className="status-mode-btn status-terminal-count-btn"
+            onClick={(e) => {
+              if (terminalListOpen) {
+                setTerminalListOpen(false);
+                return;
+              }
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              // Anchor right edge to the button's right edge, bottom just
+              // above the button - same approach as the dormant popover.
+              setTerminalListAnchor({
+                right: window.innerWidth - r.right,
+                bottom: window.innerHeight - r.top + 4,
+              });
+              setTerminalListOpen(true);
+            }}
+            title="Click to list every terminal with its mode and AI status"
+            aria-expanded={terminalListOpen}
+            aria-haspopup="dialog"
+          >
             {totalCount} terminal{totalCount !== 1 ? 's' : ''}
             {floatingCount > 0 ? ` (${tiledCount} tiled, ${floatingCount} floating)` : ''}
-          </span>
+          </button>
           <button
             className="status-mode-btn"
             onClick={() => setShowZoomDialog(true)}
@@ -481,6 +624,13 @@ const StatusBar: React.FC = () => {
           </button>
         </div>
       </div>
+      {terminalListOpen && (
+        <TerminalListPopover
+          entries={terminalListEntries}
+          anchor={terminalListAnchor}
+          onClose={() => setTerminalListOpen(false)}
+        />
+      )}
       {dormantPopoverOpen && (
         <>
           <div className="dormant-popover-backdrop" onClick={() => setDormantPopoverOpen(false)} />

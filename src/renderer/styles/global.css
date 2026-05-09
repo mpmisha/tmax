@@ -1386,6 +1386,137 @@ html.transparency-active .input-dialog {
   white-space: nowrap;
 }
 
+/* TASK-145: clickable terminal-count popover. Lists every terminal in the
+   active scope (workspace or flat) with title, mode pill, and AI session
+   status dot. Mirrors the dormant popover styling so the footer stays
+   visually consistent. */
+.status-terminal-count-btn {
+  cursor: pointer;
+}
+.terminal-list-popover {
+  position: fixed;
+  bottom: 36px;
+  right: 12px;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 420px;
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+.terminal-list-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+.terminal-list-popover-empty {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.terminal-list-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  font-family: inherit;
+}
+.terminal-list-popover-item:hover {
+  background: rgba(137, 180, 250, 0.15);
+}
+.terminal-list-popover-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.terminal-list-popover-mode {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  background: rgba(127, 127, 127, 0.08);
+}
+.terminal-list-popover-mode.mode-tiled {
+  color: #a6e3a1;
+  border-color: rgba(166, 227, 161, 0.45);
+  background: rgba(166, 227, 161, 0.10);
+}
+.terminal-list-popover-mode.mode-floating {
+  color: #cba6f7;
+  border-color: rgba(203, 166, 247, 0.45);
+  background: rgba(203, 166, 247, 0.10);
+}
+.terminal-list-popover-mode.mode-dormant {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+.terminal-list-popover-mode.mode-detached {
+  color: #f9e2af;
+  border-color: rgba(249, 226, 175, 0.45);
+  background: rgba(249, 226, 175, 0.10);
+}
+.terminal-list-popover-ai {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  text-transform: lowercase;
+  color: var(--text-secondary);
+}
+.terminal-list-popover-ai-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6c7086;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+/* Status colors:
+   - green = waitingForUser  (the AI is done and you owe it a reply)
+   - yellow = awaitingApproval (AI proposed a tool call you must approve)
+   - blue = thinking / executingTool  (AI is busy)
+   - grey = idle  (default dot color above)
+*/
+.terminal-list-popover-ai.ai-waitingForUser .terminal-list-popover-ai-dot {
+  background: #a6e3a1;
+}
+.terminal-list-popover-ai.ai-awaitingApproval .terminal-list-popover-ai-dot {
+  background: #f9e2af;
+}
+.terminal-list-popover-ai.ai-thinking .terminal-list-popover-ai-dot,
+.terminal-list-popover-ai.ai-executingTool .terminal-list-popover-ai-dot {
+  background: #89b4fa;
+}
+
 /* Status-bar overflow ⋯ menu - mirrors the dormant popover but right-anchored
    so it doesn't run off the screen edge. Holds low-traffic items that used
    to crowd the footer (Tab colors, Logs, Report). */
