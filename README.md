@@ -16,13 +16,16 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 
 **Multiple Terminals in One View**
 - Tiling layout with horizontal/vertical splits (binary tree, like tmux)
-- Floating panels that can be dragged, resized, and maximized
+- Floating panels that can be dragged, resized, and maximized; floating panes show a `[FLOAT]` pill in the title bar
+- Float / restore button in every pane title bar (or `Ctrl+Shift+U`)
 - Equalize all panes to the same size with one shortcut
 - Status indicators per pane (green = active, grey = idle, red = error)
 - Focused pane highlighted with green-tinted title bar
+- Status bar terminal count is clickable - opens a popover listing every terminal with its title, mode, and AI session status; click a row to focus it
 
 **Workspaces**
 - A tab is a workspace - each one keeps its own panes, layout, and color tint
+- Drag workspace tabs to reorder; the order persists across restarts
 - Switch workspaces from the workspace tab bar; per-workspace state is saved across restarts
 - Multi-select panes (Ctrl+click / Cmd+click on a pane title bar) to act on several at once - "Show Selected (N)" toolbar button plus Command Palette entries (Show Selected Panes / Show All Panes / Clear Pane Selection)
 - Move a pane to another workspace from the pane ⋯ menu or the Command Palette - PTY, cwd, and scrollback survive the move
@@ -47,9 +50,11 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Shows session status, summary, branch, repo, message/tool counts, and relative time
 - Click a session to resume it directly in a new terminal pane
 - Jump to any previous prompt in the terminal (`Ctrl+Shift+K`)
-- Cross-session prompt search (`Ctrl+Shift+Y`) - search every prompt across every AI session; results stream in progressively, with a jump glyph (↗ for live panes, ↑ for inactive sessions) on each row. Inactive sessions resume in a new pane on click
-- Filter tabs: All / Copilot / Claude Code; sidebar search by name, branch, cwd, or summary
+- Cross-session prompt search (`Ctrl+Shift+Y`) - search every prompt across every AI session, with `foo AND bar` syntax to require multiple terms. Results stream in progressively, with a jump glyph (↗ for live panes, ↑ for inactive sessions) on each row. Inactive sessions resume in a new pane on click
+- Filter tabs: All / Copilot / Claude Code; sidebar search by name, branch, cwd, or summary (also supports the AND syntax)
+- AI session shimmer: a soft border pulse on any pane whose AI session is waiting for your input, suppressed when you focus the pane. Useful peripheral cue on a multi-monitor setup. Toggle in Settings → Terminal
 - Native AI session notifications when Claude Code or Copilot CLI finishes a turn or asks for approval
+- SQLite-backed Copilot session loading - reads Copilot CLI's local store directly for ~150ms startup on busy machines
 - Bulk Cleanup sessions - archive everything below a prompt-count threshold (pinned and already-archived sessions are skipped)
 - WSL session discovery — sessions from WSL distros appear with a distro badge
 
@@ -61,7 +66,7 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Single click to preview file content in a resizable side panel
 - Double click to open in default editor
 - Right-click menu: Preview, Open in Editor, Browse Here, CD Here, Copy Path
-- Filter input, show/hide dotfiles toggle, collapse all button
+- Filter input (supports `foo AND bar` for multi-token matches), show/hide dotfiles toggle, collapse all button
 - WSL filesystem support
 
 **Diff Review**
@@ -75,9 +80,10 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Both previews have an "Open externally" button if you'd rather route to the OS default viewer
 
 **Keyboard-Driven Workflow**
-- Command palette (`Ctrl+Shift+P`) with every action searchable
-- Jump to any terminal by name (`Ctrl+Shift+G`)
+- Command palette (`Ctrl+Shift+P`) with every action searchable (supports `foo AND bar` token filtering)
+- Jump to any terminal by name (`Ctrl+Shift+G`) - also supports the AND syntax
 - Pane hints for quick terminal switching (`Ctrl+Shift+J`)
+- Rename the focused pane in place with `Ctrl+Shift+R`
 - Undo close pane / workspace (`Ctrl+Shift+T`) - 10-deep stack that restores cwd, title, color, and resumes the AI session if it's still in the live list. Confirms before restoring so an accidental keypress doesn't spawn PTYs unexpectedly
 - Split, move, resize, and navigate — all from the keyboard
 - Every shortcut is fully configurable
@@ -93,7 +99,7 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Font picker with all installed monospace fonts
 - Windows 11 Mica/Acrylic transparency (Appearance tab in Settings)
 - Background material and opacity controls
-- 10 built-in color themes or create your own
+- 12 built-in theme presets (8 dark, 4 light) - Catppuccin Mocha/Latte, Warm Dusk, Tokyo Night, Dracula, Nord, Gruvbox Dark, Rosé Pine / Dawn, Solarized Dark/Light, GitHub Light - or hand-pick every color. Switching a preset recolors the whole app, not just the terminal area
 - Dark title bar forced regardless of system theme
 
 **Drag & Drop**

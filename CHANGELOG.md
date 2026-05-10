@@ -1,6 +1,42 @@
 # Changelog
 
-## v1.7.3
+## v1.8.0
+
+A feature-heavy release. Headline additions: 12 theme presets, an AND-syntax across every filter box, a per-pane attention shimmer for waiting AI sessions, drag-reorderable workspace tabs, and SQLite-backed Copilot session loading for a much faster startup.
+
+### New Features
+
+- **12 theme presets in Settings → Theme** - dropdown grouped by Dark / Light. Dark: Catppuccin Mocha, Warm Dusk, Tokyo Night, Dracula, Nord, Gruvbox Dark, Rosé Pine, Solarized Dark. Light: Solarized Light, Catppuccin Latte, Rosé Pine Dawn, GitHub Light. Picking a preset recolors the whole app (tabs, sidebars, status bar, panel borders, accents, translucent overlays) - not just the terminal area.
+- **AND syntax in every filter box** - type `auth AND bug` in any filter input (AI sessions, prompt history, file explorer, dir panel, command palette, terminal switcher, diff review) and only items matching every token show. SQLite-backed AI session search now also uses prefix matching, so partial words like `add AND refr` correctly find sessions about `refresh`.
+- **AI session shimmer** - when a Claude Code or Copilot pane is waiting for your input, its border gently pulses so you spot it from across a multi-monitor setup. The shimmer suppresses itself the moment you focus the pane, and stays quiet until the AI finishes another turn. Toggle in Settings → Terminal → "AI session shimmer".
+- **Drag-reorder workspace tabs** - in workspace tab mode, drag tabs to rearrange. Order persists across restarts.
+- **Float button in pane title bar** - a corner-arrow icon in every pane's title bar floats / restores it. Tooltip shows the toggleFloat shortcut. Floating panes also show a persistent `[FLOAT]` pill in the title bar.
+- **Clickable terminal-count in the status bar** - clicking `N terminals` opens a popover listing every terminal with its title, mode (tiled / floating / dormant / detached), and AI session status; click a row to focus it.
+- **Time-sort + alphabetical folder groups** - AI sessions list defaults to alphabetical folder groups; switch to time-based sorting from the sort menu.
+- **SQLite-backed Copilot session loading** - Copilot CLI's local SQLite store is read directly, dropping startup from seconds to ~150ms on busy machines.
+- **`Ctrl+Shift+R` in a pane** focuses the rename input in the pane's title bar (in addition to the tab rename).
+- **Drag-to-zoom on the downloads stats page** - drag horizontally on the chart to zoom into a time range; click `Reset zoom` to return.
+
+### Bug Fixes
+
+- **AI session watchers were dead in packaged builds** (TASK-143) - chokidar's transitive deps weren't bundled, so file change events never fired in the packaged app and the shimmer / live updates relied on stale data. Watchers now revive on app start in both dev and packaged.
+- **Auto-link contamination** (TASK-142) - opening a fresh AI pane in the same cwd as another pane could steal the link target. tmax now prefers panes whose title was set from the user's first command before falling back to the focused pane.
+- **`.md` paths split across two display rows** (TASK-132) are now stitched and clickable from either row, not just the top.
+- **Middle-click on a pane title bar closes the pane** (TASK-107), matching the tab middle-click-close gesture.
+- **Status bar terminal count** now correctly scopes to the active workspace in workspace tab mode and shows the global count in flat tab mode.
+- **AI session search no longer returns long-running sessions where the search terms scattered through deep prompt history** - results are post-filtered to sessions whose displayed metadata (summary + repo + branch + cwd) matches every AND token, while OR / NOT queries still get the full FTS5 result set.
+- **Copilot's `assistant.turn_end`** now sets session status to `waitingForUser` (mirroring Claude Code), so the shimmer and pane status dot fire after every Copilot reply, not only on rare confirmation events.
+
+### Polish
+
+- **Settings dialog height is pinned** across tabs - switching between Terminal / Theme / Keybindings / etc. no longer reflows the dialog box.
+- **Floating panes show a `[FLOAT]` pill** in the pane title bar so the cue stays visible regardless of focus.
+- **Float button icons** match the standard `maximize-2` / `minimize-2` diagonal-corner-arrows pattern (outward when tiled, inward when floating).
+- **Landing page (`inbarr.github.io/tmax/`) refreshed** with a terminal-aesthetic top bar, sticky nav, hero terminal that types out `tmax --help`, and a green callout for the Sunday-release cadence. Includes a one-line `npm install -g tmax-terminal` install option with a copy button.
+- **Stats page** shows a tooltip on the downloads-over-time chart explaining the drag-to-zoom gesture; zoom badge displays the active range.
+- **Per-tab middle-click close**, hover-tinted active tabs that pick up the active theme's accent color.
+
+
 
 A patch focused on copy/paste fixes for AI-CLI users.
 
