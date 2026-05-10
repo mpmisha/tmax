@@ -41,14 +41,14 @@ const CATPPUCCIN_CHROME: Record<string, string> = {
 };
 
 const WARM_DUSK_CHROME: Record<string, string> = {
-  '--bg-primary': '#11192a',
-  '--bg-secondary': '#1c2438',
-  '--border-color': '#2e3a52',
+  '--bg-primary': '#0a1422',           /* deeper navy so it's clearly not Catppuccin's purple-grey */
+  '--bg-secondary': '#13202f',
+  '--border-color': '#2a3a55',
   '--focus-border': '#ee6c4d',
-  '--text-primary': '#c8d3e6',
+  '--text-primary': '#d4dcec',
   '--text-secondary': '#8a96b0',
-  '--tab-bg': '#1c2438',
-  '--tab-active': '#3a2e3e',
+  '--tab-bg': '#13202f',
+  '--tab-active': '#1f2c3e',
   '--accent': '#ee6c4d',
   '--accent-success': '#7ec1bb',
   '--accent-warning': '#f4a261',
@@ -89,8 +89,8 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     name: 'Warm Dusk',
     theme: {
-      background: '#11192a',
-      foreground: '#c8d3e6',
+      background: '#0a1422',
+      foreground: '#d4dcec',
       cursor: '#ee6c4d',
       selectionBackground: '#2e3a52',
       black: '#2a3142',
@@ -100,7 +100,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       blue: '#6c8ebf',
       magenta: '#d09cfa',
       cyan: '#56b6c2',
-      white: '#c8d3e6',
+      white: '#d4dcec',
       brightBlack: '#3d4660',
       brightRed: '#ff8a6b',
       brightGreen: '#9bd6cf',

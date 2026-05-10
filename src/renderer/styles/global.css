@@ -161,15 +161,16 @@ html.transparency-active .input-dialog {
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--rgb-accent), 0.08);
   color: var(--text-primary);
 }
 
 .tab.active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: rgba(var(--rgb-accent), 0.18);
+  color: var(--text-primary);
   font-weight: 600;
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: var(--accent);
+  box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
 .tab.dormant {
