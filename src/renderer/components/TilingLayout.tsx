@@ -7,6 +7,16 @@ import SplitResizer from './SplitResizer';
 import PaneDropZones from './PaneDropZones';
 import EmptyState from './EmptyState';
 
+// Thin wrapper that subscribes to the per-pane refresh generation and uses
+// it in the React key on TerminalPanel. Bumping the generation (via the
+// store's refreshTerminal action) forces React to unmount + remount the
+// xterm wrapper, which clears renderer-side stalls without touching the
+// PTY (it lives in main). TASK-156 / GH #101.
+const RefreshableTerminalPanel: React.FC<{ terminalId: string }> = ({ terminalId }) => {
+  const generation = useTerminalStore((s) => s.refreshGenerations[terminalId] ?? 0);
+  return <TerminalPanel key={`${terminalId}-${generation}`} terminalId={terminalId} />;
+};
+
 interface TilingNodeProps {
   node: LayoutNode;
 }
@@ -21,7 +31,7 @@ const TilingNode: React.FC<TilingNodeProps> = ({ node }) => {
   if (node.kind === 'leaf') {
     return (
       <div className="tiling-leaf">
-        <TerminalPanel terminalId={node.terminalId} />
+        <RefreshableTerminalPanel terminalId={node.terminalId} />
         <PaneDropZones terminalId={node.terminalId} />
       </div>
     );

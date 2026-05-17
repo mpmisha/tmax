@@ -99,6 +99,15 @@ export interface TerminalInstance {
    * over. See TASK-88 / GH #85.
    */
   firstCommandTitle?: boolean;
+  /**
+   * Set when TerminalPanel's process-tree scan (TASK-171) finds an AI CLI
+   * running inside this pane's shell. The auto-link path (TASK-172) uses
+   * this as a strong signal that a brand-new session can be attached to
+   * the pane even when cwd doesn't match (wrapper changed dir, or shell
+   * doesn't emit OSC 7 / 9;9). Cleared on successful link.
+   */
+  aiProcessKind?: 'copilot' | 'claude-code';
+  aiProcessDetectedAt?: number;
   groupId?: string;
   /** Which workspace this terminal belongs to. (TASK-40) */
   workspaceId?: WorkspaceId;

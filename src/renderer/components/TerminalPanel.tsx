@@ -15,6 +15,69 @@ import { MD_PATH_PATTERN } from '../utils/md-link-parser';
 import type { AppConfig } from '../state/types';
 import '@xterm/xterm/css/xterm.css';
 
+const PING_PROMPTS = [
+  "Quick status update please - what's the current state, what just finished, and what's next? Keep it brief.",
+  "Where are we at? Briefly: what did you just finish, what's in progress, and what's next.",
+  "Status check - drop a short summary of where things stand and what the next step is.",
+  "Give me a quick read on progress: last completed step, current step, and what's coming up. Short answer.",
+  "Status ping - in a sentence or two, what's done, what's pending, and any blockers?",
+  "Brief progress check please - what just shipped, what you're working on now, and what's queued next.",
+  "What's the current status? Just a short recap: latest milestone, what's in flight, what's next.",
+  "Quick check-in: where are we, what's the next move, and is anything blocking you? Keep it tight.",
+];
+
+function pickRandomPingPrompt(): string {
+  return PING_PROMPTS[Math.floor(Math.random() * PING_PROMPTS.length)];
+}
+
+// TASK-171: AI CLI process names we look for in a pane's descendant tree.
+// Matched on the cleaned name (no path, no .exe, lowercased). Direct name
+// for the canonical binaries plus the common wrapper shims users have
+// reported (Ronny's `agency`, Copilot CLI on macOS as `copilot`, etc.).
+const AI_PROCESS_NAMES: Record<string, { title: string; kind: 'copilot' | 'claude-code' }> = {
+  'copilot': { title: 'GitHub Copilot', kind: 'copilot' },
+  'github-copilot': { title: 'GitHub Copilot', kind: 'copilot' },
+  'gh-copilot': { title: 'GitHub Copilot', kind: 'copilot' },
+  'claude': { title: 'Claude Code', kind: 'claude-code' },
+  'cc': { title: 'Claude Code', kind: 'claude-code' },
+  'claude-code': { title: 'Claude Code', kind: 'claude-code' },
+};
+
+function detectAiInChildren(names: string[]): { title: string; kind: 'copilot' | 'claude-code' } | null {
+  for (const n of names) {
+    const hit = AI_PROCESS_NAMES[n];
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// TASK-172: format a dropped file path for typing into the PTY.
+// - WSL panes: translate C:\foo\bar to /mnt/c/foo/bar so the shell inside
+//   WSL can use it directly.
+// - Quote with double quotes when the path contains whitespace; safe in
+//   cmd / PowerShell / bash / zsh. We don't try to escape embedded quotes -
+//   if a user has a file path with a literal `"` we accept they'll need to
+//   touch it up; that's a tiny minority.
+function formatPathForPty(path: string, isWsl: boolean, wslDistro?: string): string {
+  let formatted = path;
+  if (isWsl) {
+    // C:\foo\bar -> /mnt/c/foo/bar (lowercase drive letter; forward slashes).
+    // The wslDistro hint isn't used here - a WSL terminal's filesystem
+    // already has /mnt/* mounts, and Linux paths (/foo/bar) stay as-is.
+    void wslDistro;
+    const winMatch = /^([A-Za-z]):[\\/](.*)$/.exec(formatted);
+    if (winMatch) {
+      const drive = winMatch[1].toLowerCase();
+      const rest = winMatch[2].replace(/\\/g, '/');
+      formatted = `/mnt/${drive}/${rest}`;
+    }
+  }
+  if (/\s/.test(formatted)) {
+    return `"${formatted}"`;
+  }
+  return formatted;
+}
+
 function relativeTime(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
   if (diff < 5) return 'just now';
@@ -199,6 +262,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [processStatus, setProcessStatus] = useState<'active' | 'idle' | 'exited-ok' | 'exited-error'>('idle');
   const processStatusRef = useRef(processStatus);
+  // TASK-160: shows the floating "scroll to bottom" arrow only while the
+  // user is reading scrollback (xterm's viewportY is behind baseY). Updated
+  // on every onScroll tick from xterm.
+  const [isScrolledAway, setIsScrolledAway] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const [isRenamingPane, setIsRenamingPane] = useState(false);
   const statusDotMouseDownDuringRename = useRef(false);
@@ -225,6 +292,19 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   );
   const aiResumeCommandRef = useRef<string>('');
   const aiSessionStartedRef = useRef(false);
+  // TASK-171: scan the PTY's process tree for an AI CLI on each big output
+  // burst until we either find one, hit the scan cap, or the pane gets a
+  // real AI session link. A single scan up-front used to miss the case
+  // where the user types other commands first (`cd c:\\tmp`, then much
+  // later `copilot`): the early scan finishes empty, the late one would
+  // succeed but we'd never run it. Throttled by lastScanAtRef so back-to-
+  // back bursts don't all queue scans.
+  const aiProcessScanInFlightRef = useRef(false);
+  const aiProcessScanCountRef = useRef(0);
+  const aiProcessLastScanAtRef = useRef(0);
+  const aiProcessGiveUpRef = useRef(false);
+  // TASK-172: ping button double-fire guard. Cleared after 1.2 s.
+  const pingInFlightRef = useRef(false);
   // Buffer the user's first typed command so we can use it as the pane title
   // when the shell's OSC title is just "cmd.exe" / "pwsh.exe" / "bash" -
   // those generic names tell you nothing about what's actually running here.
@@ -1040,6 +1120,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         // write with the raw newline-preserved selection. Block it.
         event.preventDefault();
         window.terminalAPI.clipboardWrite(smartUnwrapForCopy(term.getSelection(), smartUnwrapRef.current));
+        useTerminalStore.getState().addToast('Copied to clipboard');
         term.clearSelection();
         return false;
       }
@@ -1052,6 +1133,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       if (isPlainEnterKey && term.hasSelection()) {
         event.preventDefault(); // Stop xterm's textarea from seeing the newline and echoing CR
         window.terminalAPI.clipboardWrite(smartUnwrapForCopy(term.getSelection(), smartUnwrapRef.current));
+        useTerminalStore.getState().addToast('Copied to clipboard');
         term.clearSelection();
         return false;
       }
@@ -1061,6 +1143,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         if (sel) {
           event.preventDefault(); // see comment in plain Ctrl+C above
           window.terminalAPI.clipboardWrite(smartUnwrapForCopy(sel, smartUnwrapRef.current));
+          useTerminalStore.getState().addToast('Copied to clipboard');
         }
         return false;
       }
@@ -1098,6 +1181,29 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     });
 
     term.open(containerRef.current);
+
+    // TASK-160: track scroll-away state for the floating jump-to-bottom
+    // arrow. xterm's onScroll alone proved unreliable in some build paths
+    // (scrollbar drag didn't fire it on this user's machine), so we also
+    // hook a DOM scroll listener on .xterm-viewport and a slow rAF poll.
+    // React's setState bails when the value doesn't change, so multiple
+    // signals don't cause extra renders.
+    const computeScrolledAway = () => {
+      try {
+        const buf = term.buffer.active;
+        if (buf.viewportY < buf.baseY) return true;
+        const vp = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null;
+        if (vp && vp.scrollHeight - vp.clientHeight - vp.scrollTop > 2) return true;
+        return false;
+      } catch { return false; }
+    };
+    const updateScrolledAway = () => setIsScrolledAway(computeScrolledAway());
+    const scrollDisposable = term.onScroll(updateScrolledAway);
+    const viewportScrollEl = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null;
+    viewportScrollEl?.addEventListener('scroll', updateScrolledAway, { passive: true });
+    // Slow poll catches anything the two listeners missed (e.g. programmatic
+    // scrolls from other handlers in this file that don't re-trigger events).
+    const scrollPollTimer = setInterval(updateScrolledAway, 750);
 
     // Hide xterm's helper textarea from UI Automation as strongly as we can
     // without breaking keyboard input. Windows Voice Access and other UIA-based
@@ -1289,12 +1395,102 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       if (e.clientX < rect.right - 18) return;
       try { syncViewportScrollArea(term); } catch { /* ignore */ }
     };
+    // TASK-161: wheel-down clamp to the live prompt. Even after wheelPreSync
+    // aligns scrollArea to bufLen * rowH, browser scrollTop clamping can
+    // leave ydisp a row or two short of baseY when the canvas-vs-viewport
+    // offset is non-zero. If a wheel-down lands the viewport at the
+    // physical bottom (scrollTop saturated) but the buffer ydisp is still
+    // behind baseY, call term.scrollToBottom() to force ydisp = baseY.
+    // Only runs on downward wheels and only when at the saturation edge,
+    // so it doesn't interfere with mid-scrolling.
+    const wheelClampHandler = (e: WheelEvent) => {
+      if (e.deltaY <= 0 || e.shiftKey) return;
+      const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null;
+      if (!viewport) return;
+      requestAnimationFrame(() => {
+        try {
+          const atPhysicalBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 1;
+          if (!atPhysicalBottom) return;
+          const buf = term.buffer.active;
+          if (buf.viewportY < buf.baseY) {
+            term.scrollToBottom();
+          }
+        } catch { /* ignore */ }
+      });
+    };
     const wheelRecoveryEl = containerRef.current;
     // Capture phase so the sync runs BEFORE xterm's wheel handler computes
     // the new scrollTop against the (possibly stale) scrollHeight.
     wheelRecoveryEl?.addEventListener('wheel', wheelPreSyncHandler, { passive: true, capture: true });
     wheelRecoveryEl?.addEventListener('wheel', wheelRecoveryHandler, { passive: true });
+    wheelRecoveryEl?.addEventListener('wheel', wheelClampHandler, { passive: true });
     wheelRecoveryEl?.addEventListener('dblclick', manualSyncHandler);
+
+    // TASK-171: AI process-tree scan scheduler. Shared between the burst
+    // trigger (in onPtyData below) and the Enter-keystroke trigger (in
+    // term.onData below). Single in-flight check + throttle keeps the
+    // cost bounded; scan cap is the hard stop after which we give up.
+    const SCAN_THROTTLE_MS = 2000;
+    const SCAN_MAX_ATTEMPTS = 10;
+    const SCAN_DELAY_MS = 800;
+    const tryScheduleAiProcessScan = () => {
+      if (aiProcessGiveUpRef.current || aiProcessScanInFlightRef.current) return;
+      const tInst = useTerminalStore.getState().terminals.get(terminalId);
+      if (!tInst || tInst.aiSessionId) return;
+      const hasUserRename = !!(tInst.customTitle && !tInst.firstCommandTitle);
+      if (hasUserRename) return;
+      const sinceLast = Date.now() - aiProcessLastScanAtRef.current;
+      if (sinceLast < SCAN_THROTTLE_MS) return;
+      if (aiProcessScanCountRef.current >= SCAN_MAX_ATTEMPTS) {
+        aiProcessGiveUpRef.current = true;
+        return;
+      }
+      aiProcessScanInFlightRef.current = true;
+      aiProcessScanCountRef.current += 1;
+      aiProcessLastScanAtRef.current = Date.now();
+      setTimeout(async () => {
+        try {
+          const names = await (window.terminalAPI as any).getPtyChildProcesses?.(terminalId) as string[] | undefined;
+          if (!names || names.length === 0) return;
+          const match = detectAiInChildren(names);
+          if (!match) return;
+          const after = useTerminalStore.getState().terminals.get(terminalId);
+          if (!after || after.aiSessionId) return;
+          const stillBlockable = !!(after.customTitle && !after.firstCommandTitle);
+          if (stillBlockable) return;
+          window.terminalAPI.diagLog('renderer:ai-process-detected', { terminalId, kind: match.kind, title: match.title, names });
+          useTerminalStore.getState().renameTerminal(
+            terminalId,
+            match.title,
+            true,
+            { firstCommand: true },
+          );
+          // TASK-171/172 bridge: stamp the pane so the auto-link path can
+          // attach a fresh AI session to this pane even if cwd doesn't
+          // match (wrapper changed dir, or shell doesn't emit OSC 7 / 9;9).
+          // Functional setState so concurrent updateTerminalTitleFromSession
+          // calls can't clobber the stamp via stale-read of the terminals
+          // map. Before this fix the stamp vanished within milliseconds,
+          // leaving the bridge with stampedPanes=0 immediately after a
+          // successful process detection.
+          useTerminalStore.setState((s) => {
+            const cur = s.terminals.get(terminalId);
+            if (!cur) return {};
+            const next = new Map(s.terminals);
+            next.set(terminalId, { ...cur, aiProcessKind: match.kind, aiProcessDetectedAt: Date.now() });
+            return { terminals: next };
+          });
+          aiProcessGiveUpRef.current = true;
+        } catch (err) {
+          window.terminalAPI.diagLog('renderer:ai-process-scan-error', { terminalId, err: String(err) });
+        } finally {
+          aiProcessScanInFlightRef.current = false;
+          if (aiProcessScanCountRef.current >= SCAN_MAX_ATTEMPTS) {
+            aiProcessGiveUpRef.current = true;
+          }
+        }
+      }, SCAN_DELAY_MS);
+    };
 
     // Write data to PTY when user types. When broadcast mode is on, the same
     // bytes are sent to every tiled pane (tmux synchronize-panes style).
@@ -1321,14 +1517,26 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
                 useTerminalStore.getState().renameTerminal(terminalId, cmd, true, { firstCommand: true });
                 break;
               }
+            } else if (ch === '\t') {
+              // Tab triggered shell autocomplete - what we have in the buffer
+              // is just the prefix the user typed, not what got executed.
+              // Abandon firstCmd capture; process detection / banner will
+              // name the pane based on what actually ran.
+              firstCmdSavedRef.current = true;
+              firstCmdBufferRef.current = '';
+              break;
             } else if (code === 0x7f || code === 0x08) {
               firstCmdBufferRef.current = firstCmdBufferRef.current.slice(0, -1);
             } else if (code === 0x03) {
               firstCmdBufferRef.current = '';
             } else if (code === 0x1b) {
-              // Escape sequence (arrows, etc.) - skip past the rest of it
-              while (i + 1 < data.length && /[a-zA-Z~]/.test(data[i + 1]) === false) i++;
-              i++;
+              // Arrow keys / history recall / etc. - whatever the user
+              // picked from history isn't in our buffer, so trusting the
+              // buffer at the next Enter would mis-title the pane. Bail
+              // out same as the Tab path.
+              firstCmdSavedRef.current = true;
+              firstCmdBufferRef.current = '';
+              break;
             } else if (code >= 0x20 && code < 0x80) {
               firstCmdBufferRef.current += ch;
             }
@@ -1337,6 +1545,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
           // Pane already has an aiSessionId or a custom title - don't keep watching.
           firstCmdSavedRef.current = true;
         }
+      }
+
+      // TASK-171: every Enter keystroke is the user's signal that they
+      // just ran a command. Schedule an AI process-tree scan so we catch
+      // "user just typed `copilot`" quickly. tryScheduleAiProcessScan
+      // self-throttles so this can't spam.
+      if (data.includes('\r') || data.includes('\n')) {
+        tryScheduleAiProcessScan();
       }
 
       const state = useTerminalStore.getState();
@@ -1516,6 +1732,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
             rafScheduled = true;
             requestAnimationFrame(flushPendingData);
           }
+          // ── AI process detection (TASK-171 / GH #99) ───────────────
+          // A substantial output burst triggers a child-process query
+          // ~800 ms later. We allow up to a few scans per pane to handle
+          // the typical sequence "shell prompt -> cd -> copilot": the
+          // first burst is the shell, the later burst is the AI. The
+          // Enter-keystroke path (in term.onData below) also schedules
+          // a scan, since pressing Enter is the user's signal that they
+          // just ran a command. Each scan is one wmic/pgrep call; the
+          // throttle + cap keeps total cost bounded.
+          if (
+            !aiProcessGiveUpRef.current &&
+            !aiProcessScanInFlightRef.current &&
+            data.length > 80
+          ) {
+            tryScheduleAiProcessScan();
+          }
           // ── CWD detection ──────────────────────────────────────────
           // 1. OSC 7 (standard): \x1b]7;file:///C:/path\x07
           // 2. OSC 9;9 (ConPTY/Windows Terminal): \x1b]9;9;C:\path\x07
@@ -1685,19 +1917,34 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     const textareaEl = containerRef.current.querySelector('textarea');
     const handleBlur = () => {
       window.terminalAPI.diagLog('renderer:focus-lost', { terminalId });
-      // Re-focus if this terminal is still the active one AND nothing else explicitly took
-      // focus. Check document.activeElement instead of overlay visibility flags — a panel
-      // being visible (e.g. Copilot sidebar) doesn't mean it holds keyboard focus.
       requestAnimationFrame(() => {
         if (useTerminalStore.getState().focusedTerminalId !== terminalId) return;
-        // If the window itself lost OS focus (e.g. Windows Voice Access, a screen reader, or
-        // any other out-of-process overlay grabbed focus), don't fight it. Stealing focus
-        // back here causes a tug-of-war that breaks dictation and misplaces UIA-anchored
-        // overlays. The handleWindowFocus path below restores xterm focus when the user
-        // comes back to the window.
-        if (!document.hasFocus()) return;
         const active = document.activeElement;
         const somethingElseTookFocus = active && active !== document.body && !containerRef.current?.contains(active);
+        const hasFocus = document.hasFocus();
+        // Identify the focus thief so the freeze pattern is diagnosable from
+        // diag logs alone. tag/id/class is enough to fingerprint most
+        // offenders (settings panel, command palette, dir picker, AI sidebar)
+        // without leaking content.
+        window.terminalAPI.diagLog('renderer:focus-refocus-check', {
+          terminalId,
+          hasFocus,
+          visible: document.visibilityState === 'visible',
+          thief: somethingElseTookFocus && active ? {
+            tag: active.tagName,
+            id: active.id || null,
+            cls: (typeof active.className === 'string' ? active.className : '').slice(0, 80) || null,
+          } : null,
+        });
+        // Original guard skipped refocus whenever document.hasFocus() was
+        // false, to avoid fighting Voice Access / screen readers. On dev box
+        // sessions over RDP, hasFocus() returns false even while the user is
+        // actively typing through the relay - the recovery never fired and
+        // the cursor sat dead. We now allow one refocus attempt when the
+        // page is still visible. Assistive tech that genuinely owns focus
+        // will pull it back on its next tick; a single round-trip is a
+        // bearable tug, while the RDP freeze is not.
+        if (!hasFocus && document.visibilityState !== 'visible') return;
         if (!somethingElseTookFocus) {
           try { terminalRef.current?.focus(); } catch { /* disposed */ }
         }
@@ -1867,6 +2114,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       rightClickInFlight = false;
       if (term.hasSelection()) {
         window.terminalAPI.clipboardWrite(smartUnwrapForCopy(term.getSelection(), smartUnwrapRef.current));
+        useTerminalStore.getState().addToast('Copied to clipboard');
         term.clearSelection();
         clearPendingTuiCopy();
         lastCopyAt = Date.now();
@@ -1878,6 +2126,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         const text = pendingTuiCopyText;
         clearPendingTuiCopy();
         window.terminalAPI.clipboardWrite(smartUnwrapForCopy(text, smartUnwrapRef.current));
+        useTerminalStore.getState().addToast('Copied to clipboard');
         lastCopyAt = Date.now();
         return;
       }
@@ -1904,6 +2153,37 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     };
     // Use capture phase to intercept before any other handler
     containerRef.current.addEventListener('contextmenu', handleContextMenu, true);
+
+    // TASK-172: drag-and-drop a file onto the pane to type its path - same
+    // affordance Windows Terminal has. dragover with a Files payload turns
+    // the pane into a drop zone; the actual drop writes space-separated
+    // (and quoted, if needed) paths into the PTY without auto-submitting.
+    const handleDragOver = (e: DragEvent) => {
+      // Only react when files are being dragged in - lets internal element
+      // drags (like a tab from the workspace bar) pass through untouched.
+      if (!e.dataTransfer?.types?.includes?.('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    };
+    const handleFileDrop = (e: DragEvent) => {
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const paths: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i] as File & { path?: string };
+        if (f.path) paths.push(f.path);
+      }
+      if (paths.length === 0) return;
+      const inst = useTerminalStore.getState().terminals.get(terminalId);
+      const out = paths
+        .map((p) => formatPathForPty(p, !!inst?.wsl, inst?.wslDistro))
+        .join(' ');
+      window.terminalAPI.writePty(terminalId, out);
+    };
+    containerRef.current.addEventListener('dragover', handleDragOver);
+    containerRef.current.addEventListener('drop', handleFileDrop);
 
     // Intercept the document-level `copy` event for this pane so that the
     // browser's default copy (which would write the raw DOM-selected text
@@ -1954,6 +2234,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     return () => {
       resizeObserver.disconnect();
       dataDisposable.dispose();
+      scrollDisposable.dispose();
+      viewportScrollEl?.removeEventListener('scroll', updateScrolledAway);
+      clearInterval(scrollPollTimer);
       unsubscribePtyData();
       unsubscribePtyExit();
       wslPromptCleanupRef.current?.();
@@ -1964,6 +2247,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         textareaEl.removeEventListener('blur', handleBlur);
       }
       containerEl.removeEventListener('contextmenu', handleContextMenu, true);
+      containerEl.removeEventListener('dragover', handleDragOver);
+      containerEl.removeEventListener('drop', handleFileDrop);
       containerEl.removeEventListener('copy', handleCopyEvent, true);
       selectionDisposable.dispose();
       containerEl.removeEventListener('mousedown', handleRightMouseButton, true);
@@ -1972,6 +2257,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       containerEl.removeEventListener('mouseup', handleLeftMouseUp, true);
       wheelRecoveryEl?.removeEventListener('wheel', wheelPreSyncHandler, true);
       wheelRecoveryEl?.removeEventListener('wheel', wheelRecoveryHandler);
+      wheelRecoveryEl?.removeEventListener('wheel', wheelClampHandler);
       wheelRecoveryEl?.removeEventListener('dblclick', manualSyncHandler);
       titleDisposable.dispose();
       // Flush any pending PTY data so serialize captures the latest content
@@ -2227,6 +2513,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     if (cc) return cc.status;
     const cp = s.copilotSessions.find((x) => x.id === aiSessionId);
     return cp?.status;
+  });
+  const aiProvider = useTerminalStore((s): 'copilot' | 'claude-code' | undefined => {
+    if (!aiSessionId) return undefined;
+    if (s.copilotSessions.find((x) => x.id === aiSessionId)) return 'copilot';
+    if (s.claudeCodeSessions.find((x) => x.id === aiSessionId)) return 'claude-code';
+    return undefined;
   });
   // Force a re-render every 30s so the relative time stays fresh even when
   // nothing else in the session changes.
@@ -2568,6 +2860,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
               setRenameValue(title || '');
               setIsRenamingPane(true);
             }}>✏️ Rename pane <span className="context-menu-shortcut">Ctrl+Shift+R</span></button>
+            <button className="context-menu-item" onClick={() => {
+              setPaneMenuPos(null);
+              useTerminalStore.getState().refreshTerminal(terminalId);
+            }}>🔄 Refresh pane <span className="context-menu-shortcut">Ctrl+Alt+R</span></button>
+            <button className="context-menu-item" onClick={() => {
+              setPaneMenuPos(null);
+              useTerminalStore.getState().replaceTerminal(terminalId);
+            }}>♻️ New terminal in place <span className="context-menu-shortcut">Ctrl+Alt+N</span></button>
             {aiSessionId && (
               <button className="context-menu-item" onClick={() => {
                 setPaneMenuPos(null);
@@ -2585,6 +2885,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
                 setPaneMenuPos(null);
                 useTerminalStore.getState().showAiSessionsForPane(terminalId);
               }}>✨ Show in AI sessions</button>
+            )}
+            {aiSessionId && (
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  setPaneMenuPos(null);
+                  window.terminalAPI.clipboardWrite(aiSessionId);
+                }}
+                title={aiSessionId}
+              >📋 Copy session ID</button>
             )}
             <div className="context-menu-separator" />
             <button className="context-menu-item" onClick={() => {
@@ -2736,6 +3046,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       {showDiag && <DiagnosticsOverlay terminalId={terminalId} diagRef={diagRef} mainDiag={mainDiagRef.current} logPath={logPathRef.current} onClose={() => setShowDiag(false)} />}
       <div ref={containerRef} className="xterm-container" />
       {bgTint && <div className="terminal-color-overlay" style={{ background: bgTint + '18' }} />}
+      {isScrolledAway && (
+        <button
+          className="terminal-jump-to-bottom"
+          title="Jump to bottom"
+          aria-label="Jump to bottom"
+          onClick={(e) => {
+            e.stopPropagation();
+            const term = terminalRef.current;
+            if (!term) return;
+            term.scrollToBottom();
+            term.focus();
+          }}
+        >
+          &#8595;
+        </button>
+      )}
       {latestPrompt && (
         <div className="terminal-pane-latest-prompt" title={`${latestPrompt}\n\nClick to jump to this prompt in the buffer`}>
           {aiSessionId && (
@@ -2759,6 +3085,43 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
           >{latestPrompt}</span>
           {latestPromptTime && (
             <span className="terminal-pane-latest-prompt-time">{relativeTime(latestPromptTime)}</span>
+          )}
+          {aiSessionId && (
+            <button
+              className="terminal-pane-latest-prompt-btn"
+              title="Ping - ask the session where it's at, auto-sent"
+              onClick={(e) => {
+                e.stopPropagation();
+                // TASK-172 guard: char-by-char path made things worse
+                // (Copilot dropped the text entirely). Reverting to
+                // bracketed-paste single-write that at least shows text
+                // in the prompt; longer Enter delay for Copilot since
+                // its Ink seems to need more settle time before it
+                // recognizes Enter as submit. Double-fire guard prevents
+                // the toast-fires-twice case under React dev double-
+                // invoke or accidental double-clicks.
+                if (pingInFlightRef.current) return;
+                pingInFlightRef.current = true;
+                setTimeout(() => { pingInFlightRef.current = false; }, 1200);
+                const prompt = pickRandomPingPrompt();
+                const isBracketed = cursorHideSignalsRef.current.bracketedPaste;
+                const payload = prepareClipboardPaste(prompt, isBracketed);
+                window.terminalAPI.writePty(terminalId, payload);
+                // Enter sequence: settle window + try \r then \n with a
+                // small gap between. xterm/Ink combinations vary on which
+                // byte triggers submit; sending both back-to-back at the
+                // same delay covers either case. The brief gap between
+                // them lets Copilot's input handler process the first
+                // before the second arrives.
+                setTimeout(() => {
+                  window.terminalAPI.writePty(terminalId, '\r');
+                }, 500);
+                setTimeout(() => {
+                  window.terminalAPI.writePty(terminalId, '\n');
+                }, 600);
+                useTerminalStore.getState().addToast('Status request sent');
+              }}
+            >🔔</button>
           )}
           <button
             className="terminal-pane-latest-prompt-btn"

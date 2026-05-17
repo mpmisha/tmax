@@ -290,10 +290,31 @@ const StatusBar: React.FC = () => {
   const [changelogContent, setChangelogContent] = useState('');
   const [changelogLoading, setChangelogLoading] = useState(false);
 
-  const submitReport = () => {
-    const issueBody = `**Version:** ${appVersion}\n**Platform:** ${navigator.platform}\n\n**Description:**\n\n\n**Steps to reproduce:**\n1. \n\n**Expected behavior:**\n\n**Actual behavior:**\n`;
-    const url = `https://github.com/InbarR/tmax/issues/new?body=${encodeURIComponent(issueBody)}`;
-    window.terminalAPI.clipboardWrite(issueBody);
+  const submitReport = async () => {
+    const template = `**Version:** ${appVersion}\n**Platform:** ${navigator.platform}\n\n**Description:**\n\n\n**Steps to reproduce:**\n1. \n\n**Expected behavior:**\n\n**Actual behavior:**\n`;
+
+    // TASK-164: embed a short diag tail directly in the issue URL so the
+    // reporter doesn't have to paste from clipboard manually. Cap at 5 KB
+    // so the URL+template stays well under GitHub's prefill limit (~8 KB
+    // for the query string after URL-encoding). A fuller 25 KB version
+    // still lands on the clipboard for users who want to attach more.
+    let diagShort = '';
+    let diagFull = '';
+    try {
+      const tail = await (window.terminalAPI as any).readDiagLogTail?.(25 * 1024);
+      if (tail && typeof tail === 'string' && tail.trim().length > 0) {
+        diagFull = `\n\n<details>\n<summary>Diagnostic log (last ~25 KB)</summary>\n\n\`\`\`\n${tail}\n\`\`\`\n\n</details>\n`;
+        // Slice the most-recent 5 KB so the latest entries (= closest to
+        // the bug) make it into the URL-embedded version.
+        const shortTail = tail.length > 5 * 1024 ? tail.slice(tail.length - 5 * 1024) : tail;
+        diagShort = `\n\n<details>\n<summary>Diagnostic log (last ~5 KB - more on clipboard)</summary>\n\n\`\`\`\n${shortTail}\n\`\`\`\n\n</details>\n`;
+      }
+    } catch { /* ignore - report still goes through */ }
+
+    const urlBody = template + diagShort;
+    const clipboardBody = template + diagFull;
+    const url = `https://github.com/InbarR/tmax/issues/new?body=${encodeURIComponent(urlBody)}`;
+    window.terminalAPI.clipboardWrite(clipboardBody);
     window.open(url, '_blank');
     setShowReportModal(false);
   };
@@ -616,6 +637,14 @@ const StatusBar: React.FC = () => {
             &#x22EF;
           </button>
           <button
+            className="status-mode-btn"
+            onClick={() => useTerminalStore.getState().toggleSettings()}
+            title={formatKeyForPlatform("Settings (Ctrl+,)")}
+            aria-label="Open Settings"
+          >
+            &#9881;
+          </button>
+          <button
             className="status-help-btn"
             onClick={() => useTerminalStore.getState().toggleCommandPalette()}
             title="Show command palette (Ctrl+Shift+P)"
@@ -786,7 +815,7 @@ const StatusBar: React.FC = () => {
               <button className="update-modal-close" onClick={() => setShowReportModal(false)}>&times;</button>
             </div>
             <div className="update-modal-notes">
-              <p>Clicking <strong>Open GitHub</strong> will open the new-issue page in your browser. A prefilled issue template is also copied to your clipboard.</p>
+              <p>Clicking <strong>Open GitHub</strong> opens the new-issue page in your browser with a prefilled template. The same template plus the last ~25 KB of your diagnostic log is copied to your clipboard - paste it into the issue body to give us the context we need. Review before submitting and remove any lines you don't want to share.</p>
               <p style={{ marginTop: '12px', color: 'var(--yellow)' }}>
                 <strong>Important:</strong> Use your personal GitHub account, not your org/EMU account. EMU accounts are often blocked from commenting on public repos - if the page doesn't load, paste the template into a private/incognito window.
               </p>

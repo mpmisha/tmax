@@ -72,6 +72,33 @@ const config: ForgeConfig = {
         }
       }
 
+      // better-sqlite3 is a native addon marked external in vite.main.config.ts.
+      // Without copying it, require('better-sqlite3') throws at runtime and the
+      // copilot session DB silently falls back to filesystem scanning (TASK: SQLite
+      // packaging gap in v1.8.0). Its runtime deps are `bindings` (used to locate
+      // the .node file) and `file-uri-to-path` (transitive dep of bindings).
+      const sqliteDeps = [
+        'better-sqlite3',
+        'bindings',
+        'file-uri-to-path',
+      ];
+      for (const dep of sqliteDeps) {
+        const depSrc = path.join(__dirname, 'node_modules', dep);
+        const depDest = path.join(appDir, 'node_modules', dep);
+        if (fs.existsSync(depSrc) && !fs.existsSync(depDest)) {
+          await fs.copy(depSrc, depDest);
+        }
+      }
+
+      // Copy the assets folder (icons, clawpilot.png, etc.) into the
+      // packaged app. Main-process code resolves these via app.getAppPath()
+      // + assets/<name> for notification icons and similar runtime assets.
+      const assetsSrc = path.join(__dirname, 'assets');
+      const assetsDest = path.join(appDir, 'assets');
+      if (fs.existsSync(assetsSrc)) {
+        await fs.copy(assetsSrc, assetsDest);
+      }
+
       console.log(`Copied native/external modules to ${appDir}`);
     },
   },

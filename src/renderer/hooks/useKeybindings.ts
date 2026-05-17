@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useTerminalStore } from '../state/terminal-store';
 import type { SplitDirection } from '../state/types';
 import { isMac } from '../utils/platform';
+import { getTerminalEntry } from '../terminal-registry';
+import { smartUnwrapForCopy } from '../utils/smart-unwrap';
 
 interface KeyCombo {
   ctrlKey: boolean;
@@ -133,6 +135,17 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   'Ctrl+Shift+L': 'cycleGridColumns',
   'Ctrl+Shift+O': 'colorizeAllTabs',
   'F5': 'continueAgent',
+  // Ctrl+Insert: Windows-classic copy idiom (mirror of Shift+Insert paste).
+  // Issue #102. No-op when there's no selection. xterm has no default for
+  // Ctrl+Insert so binding it here doesn't clobber anything.
+  'Ctrl+Insert': 'copySelection',
+  // Ctrl+Alt+R: soft refresh of the focused pane (xterm remount, PTY
+  // untouched). Escape hatch for renderer-side input-freeze. Issue #101.
+  // Ctrl+Shift+R is taken by rename, so Alt instead of Shift.
+  'Ctrl+Alt+R': 'refreshPane',
+  // Ctrl+Alt+N: replace the focused pane with a fresh shell in the same
+  // slot. TASK-173.
+  'Ctrl+Alt+N': 'replaceTerminal',
 };
 
 export function useKeybindings(): void {
@@ -330,6 +343,38 @@ function dispatchAction(action: string): void {
       if (terminal?.aiSessionId) {
         window.terminalAPI.writePty(focusedId, 'continue\r');
       }
+      break;
+    }
+    case 'refreshPane': {
+      // Ctrl+Alt+R (issue #101): soft refresh - bumps the pane's refresh
+      // generation, forcing a React remount of the xterm wrapper. The
+      // PTY lives in main and is untouched, so the shell process keeps
+      // running and scrollback survives the remount.
+      if (!focusedId) break;
+      store.refreshTerminal(focusedId);
+      break;
+    }
+    case 'replaceTerminal': {
+      // Ctrl+Alt+N (TASK-173): close the focused pane's PTY and spawn a
+      // fresh one in the same layout slot. Hard reset; PTY does NOT
+      // survive.
+      if (!focusedId) break;
+      store.replaceTerminal(focusedId);
+      break;
+    }
+    case 'copySelection': {
+      // Ctrl+Insert (issue #102): copy the focused terminal's current
+      // selection. Silent no-op when there's nothing selected so the user's
+      // existing clipboard contents aren't stomped with an empty string.
+      if (!focusedId) break;
+      const entry = getTerminalEntry(focusedId);
+      const term = entry?.terminal;
+      if (!term || !term.hasSelection()) break;
+      const sel = term.getSelection();
+      if (!sel) break;
+      const smartEnabled = store.config?.terminal?.smartUnwrapCopy !== false;
+      window.terminalAPI.clipboardWrite(smartUnwrapForCopy(sel, smartEnabled));
+      term.clearSelection();
       break;
     }
     case 'resizeUp':

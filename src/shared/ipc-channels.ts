@@ -13,6 +13,12 @@ export const IPC = {
   // notifications can show the same display name the user sees in the pane
   // title. The map is `Record<string, string>` (sessionId -> displayName).
   SESSION_NAME_OVERRIDES_SYNC: 'session:nameOverridesSync',
+  // TASK-163: main -> renderer broadcast when tmax-session.json changes on
+  // disk (because another tmax window wrote to it). Carries no payload; the
+  // renderer responds by re-reading the file via SESSION_LOAD and merging
+  // just the cross-window-syncable maps (sessionNameOverrides,
+  // sessionLifecycleOverrides, sessionPinned) into its in-memory state.
+  SESSION_FILE_CHANGED: 'session:fileChanged',
   CONFIG_OPEN: 'config:open',
   OPEN_PATH: 'shell:openPath',
   DETACH_CREATE: 'detach:create',
@@ -49,8 +55,13 @@ export const IPC = {
   IMAGE_READ_DATA_URL: 'image:readDataUrl',
   RESOLVE_CLIPBOARD_BASENAME: 'image:resolveClipboardBasename',
   PTY_GET_DIAG: 'pty:getDiag',
+  // TASK-171: list descendant process names of a PTY's shell pid so the
+  // renderer can detect AI CLIs (copilot/claude/cc) running inside a pane
+  // without text-pattern scanning. One-shot query, not polled.
+  PTY_GET_CHILD_PROCESSES: 'pty:getChildProcesses',
   DIAG_LOG: 'diag:log',
   DIAG_GET_LOG_PATH: 'diag:getLogPath',
+  DIAG_READ_TAIL: 'diag:readTail',
   GET_SYSTEM_FONTS: 'system:getFonts',
   // ── Transparency ────────────────────────────────────────────────────
   SET_BACKGROUND_MATERIAL: 'transparency:setMaterial',

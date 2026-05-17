@@ -27,31 +27,50 @@ const Settings: React.FC = () => {
 
   const close = () => useTerminalStore.getState().closeSettings();
 
+  const TAB_LABELS: Record<Tab, string> = {
+    terminal: 'Terminal',
+    shells: 'Shells',
+    keybindings: 'Keybindings',
+    theme: 'Theme',
+    appearance: 'Appearance',
+  };
+
   return (
     <div className="settings-backdrop" onMouseDown={close}>
       <div className="settings-dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className="settings-header">
-          <span>Settings</span>
-          <button className="shortcuts-close" onClick={close}>&#10005;</button>
+          <span className="settings-title">Settings</span>
+          <button className="shortcuts-close" onClick={close} title="Close (Esc)">&#10005;</button>
         </div>
-        <div className="settings-tabs">
-          {(['terminal', 'keybindings', 'shells', 'theme', 'appearance'] as Tab[]).map((t) => (
-            <button key={t} className={`settings-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-        <div className="settings-body">
-          {tab === 'terminal' && <TerminalSettings />}
-          {tab === 'keybindings' && <KeybindingsSettings />}
-          {tab === 'shells' && <ShellsSettings />}
-          {tab === 'theme' && <ThemeSettings />}
-          {tab === 'appearance' && <AppearanceSettings />}
+        <div className="settings-layout">
+          <nav className="settings-sidebar">
+            {(['terminal', 'shells', 'keybindings', 'theme', 'appearance'] as Tab[]).map((t) => (
+              <button key={t} className={`settings-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </nav>
+          <div className="settings-body">
+            {tab === 'terminal' && <TerminalSettings />}
+            {tab === 'keybindings' && <KeybindingsSettings />}
+            {tab === 'shells' && <ShellsSettings />}
+            {tab === 'theme' && <ThemeSettings />}
+            {tab === 'appearance' && <AppearanceSettings />}
+          </div>
         </div>
       </div>
     </div>
   );
 };
+
+// ── Section grouping ──────────────────────────────────────────────
+
+const SectionGroup: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div className="settings-group">
+    <div className="settings-group-header">{title}</div>
+    <div className="settings-group-body">{children}</div>
+  </div>
+);
 
 // ── Terminal Settings ──────────────────────────────────────────────
 
@@ -188,62 +207,76 @@ const TerminalSettings: React.FC = () => {
 
   return (
     <div className="settings-section">
-      <SettingRow label="Default Shell" description="Shell used for new terminals">
-        <select className="settings-input" value={config.defaultShellId}
-          onChange={(e) => update({ defaultShellId: e.target.value })}>
-          {config.shells.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </SettingRow>
-      <SettingRow label="Default Start Folder" description="Global default working directory (shell-specific overrides this)">
-        <input type="text" className="settings-input" value={(config as any).defaultCwd || ''}
-          placeholder="e.g. C:\Projects"
-          onChange={(e) => update({ defaultCwd: e.target.value } as any)} />
-      </SettingRow>
-      <SettingRow label="Copilot Command" description="Base command for Copilot sessions">
-        <input type="text" className="settings-input" value={config.copilotCommand ?? ''}
-          placeholder="copilot"
-          onChange={(e) => update({ copilotCommand: e.target.value } as any)} />
-      </SettingRow>
-      <SettingRow label="Claude Code Command" description="Base command for Claude Code sessions (e.g., claude)">
-        <input type="text" className="settings-input" value={config.claudeCodeCommand || 'claude'}
-          placeholder="claude"
-          onChange={(e) => update({ claudeCodeCommand: e.target.value } as any)} />
-      </SettingRow>
-      <SettingRow label="AI session notifications" description="Show OS notifications when a Copilot or Claude Code session finishes a turn / needs your attention. Disable if you use an external hook plugin (e.g. claude-notifications-go).">
-        <label className="toggle-switch">
-          <input type="checkbox"
-            checked={(config as any).aiSessionNotifications !== false}
-            onChange={(e) => update({ aiSessionNotifications: e.target.checked } as any)} />
-          <span className="toggle-track" />
-        </label>
-      </SettingRow>
-      <SettingRow label="AI session shimmer" description="Subtly pulse the border of any pane whose AI session is waiting for your input, unless that pane is the one you're currently in. Useful as a peripheral cue when you're on another pane or another window.">
-        <label className="toggle-switch">
-          <input type="checkbox"
-            checked={(config as any).aiShimmerEnabled !== false}
-            onChange={(e) => update({ aiShimmerEnabled: e.target.checked } as any)} />
-          <span className="toggle-track" />
-        </label>
-      </SettingRow>
-      <SettingRow label="AI session load limit" description="Cap on recent sessions loaded per provider (Copilot and Claude Code each). Lower it for faster boot or less memory; set 0 to disable session loading entirely.">
-        <input type="number" className="settings-input small" min={0} step={1}
-          value={(config as any).aiSessionLoadLimit ?? 314}
-          onChange={(e) => {
-            const n = parseInt(e.target.value, 10);
-            const clamped = Number.isFinite(n) && n >= 0 ? n : 0;
-            update({ aiSessionLoadLimit: clamped } as any);
-          }} />
-      </SettingRow>
-      <SettingRow label="Old Session Threshold" description="Days of inactivity before a session is marked as Old">
-        <input type="number" className="settings-input small" value={(config as any).oldSessionDays ?? 30}
-          onChange={(e) => update({ oldSessionDays: parseInt(e.target.value) || 30 } as any)} />
-      </SettingRow>
-      <SettingRow label="Show-Window Hotkey" description="Global shortcut that restores and focuses tmax from anywhere. Takes effect on next launch.">
-        <HotkeyCapture
-          value={(config as any).showWindowHotkey ?? 'CommandOrControl+Shift+Space'}
-          defaultValue="CommandOrControl+Shift+Space"
-          onChange={(v) => update({ showWindowHotkey: v } as any)} />
-      </SettingRow>
+      <SectionGroup title="Defaults">
+        <SettingRow label="Default Shell" description="Shell used for new terminals">
+          <select className="settings-input" value={config.defaultShellId}
+            onChange={(e) => update({ defaultShellId: e.target.value })}>
+            {config.shells.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </SettingRow>
+        <SettingRow label="Default Start Folder" description="Global default working directory (shell-specific overrides this)">
+          <input type="text" className="settings-input" value={(config as any).defaultCwd || ''}
+            placeholder="e.g. C:\Projects"
+            onChange={(e) => update({ defaultCwd: e.target.value } as any)} />
+        </SettingRow>
+      </SectionGroup>
+
+      <SectionGroup title="AI sessions">
+        <SettingRow label="Copilot Command" description="Base command for Copilot sessions">
+          <input type="text" className="settings-input" value={config.copilotCommand ?? ''}
+            placeholder="copilot"
+            onChange={(e) => update({ copilotCommand: e.target.value } as any)} />
+        </SettingRow>
+        <SettingRow label="Claude Code Command" description="Base command for Claude Code sessions (e.g., claude)">
+          <input type="text" className="settings-input" value={config.claudeCodeCommand || 'claude'}
+            placeholder="claude"
+            onChange={(e) => update({ claudeCodeCommand: e.target.value } as any)} />
+        </SettingRow>
+        <SettingRow label="Notifications" description="Show OS notifications when a Copilot or Claude Code session finishes a turn / needs your attention. Disable if you use an external hook plugin (e.g. claude-notifications-go).">
+          <label className="toggle-switch">
+            <input type="checkbox"
+              checked={(config as any).aiSessionNotifications !== false}
+              onChange={(e) => update({ aiSessionNotifications: e.target.checked } as any)} />
+            <span className="toggle-track" />
+          </label>
+        </SettingRow>
+        <SettingRow label="Excluded phrases" description="Notifications whose title or body contains any of these (case-insensitive) are suppressed silently. Wrap a line in /slashes/ to use a regex (case-insensitive). Useful for filtering out background-automation toasts. (one phrase per line - press Enter between entries)">
+          <textarea className="settings-input notification-exclude-textarea" rows={4}
+            placeholder={'scheduled automation\nbackground task'}
+            value={((config as any).notificationExcludeStrings ?? []).join('\n')}
+            onChange={(e) => update({ notificationExcludeStrings: e.target.value.split('\n') } as any)} />
+        </SettingRow>
+        <SettingRow label="Shimmer indicator" description="Subtly pulse the border of any pane whose AI session is waiting for your input, unless that pane is the one you're currently in. Useful as a peripheral cue when you're on another pane or another window.">
+          <label className="toggle-switch">
+            <input type="checkbox"
+              checked={(config as any).aiShimmerEnabled !== false}
+              onChange={(e) => update({ aiShimmerEnabled: e.target.checked } as any)} />
+            <span className="toggle-track" />
+          </label>
+        </SettingRow>
+        <SettingRow label="Session load limit" description="Cap on recent sessions loaded per provider (Copilot and Claude Code each). Lower it for faster boot or less memory; set 0 to disable session loading entirely.">
+          <input type="number" className="settings-input small" min={0} step={1}
+            value={(config as any).aiSessionLoadLimit ?? 314}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              const clamped = Number.isFinite(n) && n >= 0 ? n : 0;
+              update({ aiSessionLoadLimit: clamped } as any);
+            }} />
+        </SettingRow>
+        <SettingRow label="Old session threshold" description="Days of inactivity before a session is marked as Old">
+          <input type="number" className="settings-input small" value={(config as any).oldSessionDays ?? 30}
+            onChange={(e) => update({ oldSessionDays: parseInt(e.target.value) || 30 } as any)} />
+        </SettingRow>
+      </SectionGroup>
+
+      <SectionGroup title="System">
+        <SettingRow label="Show-window hotkey" description="Global shortcut that restores and focuses tmax from anywhere. Takes effect on next launch.">
+          <HotkeyCapture
+            value={(config as any).showWindowHotkey ?? 'CommandOrControl+Shift+Space'}
+            defaultValue="CommandOrControl+Shift+Space"
+            onChange={(v) => update({ showWindowHotkey: v } as any)} />
+        </SettingRow>
+      </SectionGroup>
     </div>
   );
 };
@@ -331,13 +364,40 @@ function formatAction(action: string): string {
 
 // ── Shells Settings ───────────────────────────────────────────────
 
+// Local-state input that commits to the store on blur / Enter. Keeps
+// every keystroke local so the path/args/cwd fields don't churn the
+// config (which previously round-tripped through the main process and
+// could reject intermediate values, making the inputs feel frozen).
+const ShellField: React.FC<{
+  value: string;
+  placeholder?: string;
+  onCommit: (v: string) => void;
+}> = ({ value, placeholder, onCommit }) => {
+  const [draft, setDraft] = useState(value);
+  // Sync down when the upstream value changes (e.g. another shell removed).
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <input
+      className="settings-input"
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== value) onCommit(draft); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        else if (e.key === 'Escape') { setDraft(value); (e.target as HTMLInputElement).blur(); }
+      }}
+    />
+  );
+};
+
 const ShellsSettings: React.FC = () => {
   const config = useTerminalStore((s) => s.config)!;
   const update = useTerminalStore((s) => s.updateConfig);
 
-  const updateShell = (index: number, field: string, value: string) => {
+  const commitShell = (index: number, patch: Partial<typeof config.shells[number]>) => {
     const newShells = [...config.shells];
-    newShells[index] = { ...newShells[index], [field]: value };
+    newShells[index] = { ...newShells[index], ...patch };
     update({ shells: newShells });
   };
 
@@ -348,37 +408,49 @@ const ShellsSettings: React.FC = () => {
   };
 
   const removeShell = (index: number) => {
+    const shellToRemove = config.shells[index];
+    if (shellToRemove.id === config.defaultShellId) return; // Guarded by disabled button; defensive.
     const newShells = config.shells.filter((_, i) => i !== index);
     update({ shells: newShells });
   };
 
+  const setDefault = (id: string) => update({ defaultShellId: id });
+
   return (
     <div className="settings-section">
-      {config.shells.map((shell, index) => (
-        <div key={shell.id} className="shell-card">
-          <div className="shell-card-header">
-            <input className="settings-input" value={shell.name} placeholder="Name"
-              onChange={(e) => updateShell(index, 'name', e.target.value)} />
-            <button className="shell-remove" onClick={() => removeShell(index)} title="Remove">&#10005;</button>
+      {config.shells.map((shell, index) => {
+        const isDefault = shell.id === config.defaultShellId;
+        return (
+          <div key={shell.id} className={`shell-card${isDefault ? ' shell-card-default' : ''}`}>
+            <div className="shell-card-header">
+              <ShellField value={shell.name} placeholder="Name"
+                onCommit={(v) => commitShell(index, { name: v })} />
+              {isDefault ? (
+                <span className="shell-default-badge" title="New terminals open with this shell">★ Default</span>
+              ) : (
+                <button className="shell-set-default" onClick={() => setDefault(shell.id)}
+                  title="Make this the default shell for new terminals">Set default</button>
+              )}
+              <button className="shell-remove"
+                onClick={() => removeShell(index)}
+                disabled={isDefault}
+                title={isDefault ? 'Pick another default before removing' : 'Remove'}>&#10005;</button>
+            </div>
+            <SettingRow label="Path" description="Executable path">
+              <ShellField value={shell.path} placeholder="e.g. pwsh.exe"
+                onCommit={(v) => commitShell(index, { path: v })} />
+            </SettingRow>
+            <SettingRow label="Arguments" description="Space-separated args">
+              <ShellField value={shell.args.join(' ')} placeholder="e.g. -NoLogo"
+                onCommit={(v) => commitShell(index, { args: v ? v.split(' ') : [] })} />
+            </SettingRow>
+            <SettingRow label="Start Folder" description="Default working directory">
+              <ShellField value={shell.cwd || ''} placeholder="e.g. C:\Projects"
+                onCommit={(v) => commitShell(index, { cwd: v })} />
+            </SettingRow>
           </div>
-          <SettingRow label="Path" description="Executable path">
-            <input className="settings-input" value={shell.path} placeholder="e.g. pwsh.exe"
-              onChange={(e) => updateShell(index, 'path', e.target.value)} />
-          </SettingRow>
-          <SettingRow label="Arguments" description="Space-separated args">
-            <input className="settings-input" value={shell.args.join(' ')} placeholder="e.g. -NoLogo"
-              onChange={(e) => {
-                const newShells = [...config.shells];
-                newShells[index] = { ...newShells[index], args: e.target.value ? e.target.value.split(' ') : [] };
-                update({ shells: newShells });
-              }} />
-          </SettingRow>
-          <SettingRow label="Start Folder" description="Default working directory">
-            <input className="settings-input" value={shell.cwd || ''} placeholder="e.g. C:\Projects"
-              onChange={(e) => updateShell(index, 'cwd', e.target.value)} />
-          </SettingRow>
-        </div>
-      ))}
+        );
+      })}
       <button className="settings-add-btn" onClick={addShell}>+ Add Shell</button>
     </div>
   );
@@ -419,7 +491,8 @@ const ThemeSettings: React.FC = () => {
 
   return (
     <div className="settings-section">
-      <SettingRow label="Preset" description="Pick a built-in palette - selecting one sets every color below at once.">
+      <SectionGroup title="Preset">
+      <SettingRow label="Palette" description="Pick a built-in palette - selecting one sets every color below at once.">
         <div className="theme-preset-control">
           {(() => {
             const activePreset = THEME_PRESETS.find((p) =>
@@ -465,21 +538,24 @@ const ThemeSettings: React.FC = () => {
           </select>
         </div>
       </SettingRow>
-      <div className="theme-grid">
-        {colors.map(({ key, label }) => (
-          <div key={key} className="theme-color-row">
-            <label className="theme-color-label">{label}</label>
-            <div className="theme-color-input-group">
-              <input type="color" className="theme-color-picker"
-                value={config.theme[key] || '#000000'}
-                onChange={(e) => updateTheme(key, e.target.value)} />
-              <input type="text" className="settings-input small"
-                value={config.theme[key] || ''}
-                onChange={(e) => updateTheme(key, e.target.value)} />
+      </SectionGroup>
+      <SectionGroup title="Colors">
+        <div className="theme-grid">
+          {colors.map(({ key, label }) => (
+            <div key={key} className="theme-color-row">
+              <label className="theme-color-label">{label}</label>
+              <div className="theme-color-input-group">
+                <input type="color" className="theme-color-picker"
+                  value={config.theme[key] || '#000000'}
+                  onChange={(e) => updateTheme(key, e.target.value)} />
+                <input type="text" className="settings-input small"
+                  value={config.theme[key] || ''}
+                  onChange={(e) => updateTheme(key, e.target.value)} />
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </SectionGroup>
     </div>
   );
 };
@@ -540,11 +616,12 @@ const AppearanceSettings: React.FC = () => {
 
   return (
     <div className="settings-section">
-      <SettingRow label="Font Size" description="Terminal font size in pixels">
+      <SectionGroup title="Font">
+      <SettingRow label="Size" description="Terminal font size in pixels">
         <input type="number" className="settings-input small" value={config.terminal.fontSize}
           onChange={(e) => update({ terminal: { ...config.terminal, fontSize: parseInt(e.target.value) || 14 } })} />
       </SettingRow>
-      <SettingRow label="Font Face" description="Type a font name or pick from the list">
+      <SettingRow label="Face" description="Type a font name or pick from the list">
         <div className="font-combobox">
           <input
             ref={fontInputRef}
@@ -615,37 +692,42 @@ const AppearanceSettings: React.FC = () => {
           })()}
         </div>
       </SettingRow>
-      <SettingRow label="Tab Mode" description="Flat: one terminal per tab. Workspaces: each tab is a collection of panes with its own grid.">
-        <select className="settings-input" value={config.tabMode || 'flat'}
-          onChange={(e) => update({ tabMode: e.target.value as 'flat' | 'workspaces' })}>
-          <option value="flat">Flat</option>
-          <option value="workspaces">Workspaces</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="Hide Tab Close Buttons" description="Hide the ✕ button on tabs to avoid accidentally closing them">
-        <label className="toggle-switch">
-          <input type="checkbox" checked={(config as any).hideTabCloseButtons === true}
-            onChange={() => useTerminalStore.getState().toggleHideTabCloseButtons()} />
-          <span className="toggle-track" />
-        </label>
-      </SettingRow>
-      <SettingRow label="Default Tab Color" description="Background tint for all terminals without a custom color">
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input type="color" className="theme-color-picker"
-            value={(config as any).defaultTabColor || '#1e1e2e'}
-            onChange={(e) => { applyDefaultColor(e.target.value); }} />
-          <input type="text" className="settings-input small"
-            value={(config as any).defaultTabColor || ''}
-            placeholder="e.g. #f38ba8"
-            onChange={(e) => { applyDefaultColor(e.target.value); }} />
-          <button className="settings-reset-btn" onClick={() => { applyDefaultColor(''); }}>
-            Reset
-          </button>
-        </div>
-      </SettingRow>
+      </SectionGroup>
+
+      <SectionGroup title="Tabs">
+        <SettingRow label="Tab mode" description="Flat: one terminal per tab. Workspaces: each tab is a collection of panes with its own grid.">
+          <select className="settings-input" value={config.tabMode || 'flat'}
+            onChange={(e) => update({ tabMode: e.target.value as 'flat' | 'workspaces' })}>
+            <option value="flat">Flat</option>
+            <option value="workspaces">Workspaces</option>
+          </select>
+        </SettingRow>
+        <SettingRow label="Hide tab close buttons" description="Hide the ✕ button on tabs to avoid accidentally closing them">
+          <label className="toggle-switch">
+            <input type="checkbox" checked={(config as any).hideTabCloseButtons === true}
+              onChange={() => useTerminalStore.getState().toggleHideTabCloseButtons()} />
+            <span className="toggle-track" />
+          </label>
+        </SettingRow>
+        <SettingRow label="Default tab color" description="Background tint for all terminals without a custom color">
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="color" className="theme-color-picker"
+              value={(config as any).defaultTabColor || '#1e1e2e'}
+              onChange={(e) => { applyDefaultColor(e.target.value); }} />
+            <input type="text" className="settings-input small"
+              value={(config as any).defaultTabColor || ''}
+              placeholder="e.g. #f38ba8"
+              onChange={(e) => { applyDefaultColor(e.target.value); }} />
+            <button className="settings-reset-btn" onClick={() => { applyDefaultColor(''); }}>
+              Reset
+            </button>
+          </div>
+        </SettingRow>
+      </SectionGroup>
+
       {platformSupported !== false && (
-        <>
-          <SettingRow label="Background Material" description="Window backdrop material (Windows 11)">
+        <SectionGroup title="Window">
+          <SettingRow label="Background material" description="Window backdrop material (Windows 11)">
             <select
               className="settings-input"
               value={currentMaterial}
@@ -659,7 +741,7 @@ const AppearanceSettings: React.FC = () => {
             </select>
           </SettingRow>
           {currentMaterial !== 'none' && (
-            <SettingRow label="Background Opacity" description={`UI chrome opacity: ${Math.round(currentOpacity * 100)}%`}>
+            <SettingRow label="Background opacity" description={`UI chrome opacity: ${Math.round(currentOpacity * 100)}%`}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
                 <input
                   type="range"
@@ -675,7 +757,7 @@ const AppearanceSettings: React.FC = () => {
               </div>
             </SettingRow>
           )}
-        </>
+        </SectionGroup>
       )}
     </div>
   );

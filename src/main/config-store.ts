@@ -74,6 +74,15 @@ export interface AppConfig {
    */
   aiSessionNotifications?: boolean;
   /**
+   * Case-insensitive substring deny-list applied to AI session notifications.
+   * If any non-empty trimmed entry appears in the title OR body of a
+   * notification, the toast is suppressed (and no sound plays). Empty /
+   * whitespace-only entries are ignored so users can keep blank rows while
+   * editing in Settings. Stored as raw lines so the UI doesn't rewrite
+   * input as the user types. (TASK-156)
+   */
+  notificationExcludeStrings?: string[];
+  /**
    * Subtle window shimmer when any AI session is in a needs-attention
    * state (awaitingApproval / waitingForUser) AND the tmax window is not
    * focused. Default true. Complements aiSessionNotifications: gives a
@@ -217,6 +226,9 @@ export const defaultConfig: AppConfig = {
     { action: 'resizeDown', key: 'Ctrl+Shift+Alt+ArrowDown' },
     { action: 'resizeLeft', key: 'Ctrl+Shift+Alt+ArrowLeft' },
     { action: 'resizeRight', key: 'Ctrl+Shift+Alt+ArrowRight' },
+    // Windows-classic copy idiom. Mirrors Shift+Insert (paste, handled by
+    // xterm directly). See issue #102.
+    { action: 'copySelection', key: 'Ctrl+Insert' },
   ],
   theme: {
     background: '#1e1e2e',
@@ -251,6 +263,7 @@ export const defaultConfig: AppConfig = {
   backgroundMaterial: 'none',
   backgroundOpacity: 0.8,
   aiSessionNotifications: true,
+  notificationExcludeStrings: [],
   aiShimmerEnabled: true,
   aiSessionLoadLimit: 314,
 };
@@ -306,6 +319,15 @@ export class ConfigStore {
     const boundKeys = new Set(bindings.map((b) => b.key));
     if (!boundKeys.has('Ctrl+T')) {
       bindings = [{ action: 'createTerminal', key: 'Ctrl+T' }, ...bindings];
+      changed = true;
+    }
+
+    // Inject Ctrl+Insert -> copySelection for users who pre-date issue #102.
+    // Keyed on the action rather than the combo so anyone who has already
+    // bound copySelection to a different key keeps their customisation.
+    const boundActions = new Set(bindings.map((b) => b.action));
+    if (!boundActions.has('copySelection')) {
+      bindings = [...bindings, { action: 'copySelection', key: 'Ctrl+Insert' }];
       changed = true;
     }
 

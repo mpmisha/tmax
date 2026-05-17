@@ -13,6 +13,7 @@ const MIN_HEIGHT = 150;
 const FloatingPanel: React.FC<FloatingPanelProps> = ({ panel }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const focusedTerminalId = useTerminalStore((s) => s.focusedTerminalId);
+  const refreshGeneration = useTerminalStore((s) => s.refreshGenerations[panel.terminalId] ?? 0);
   const isFocused = focusedTerminalId === panel.terminalId;
   const maximized = panel.maximized ?? false;
   const savedBounds = useRef({ x: 200, y: 150, width: 600, height: 400 });
@@ -176,6 +177,9 @@ const FloatingPanel: React.FC<FloatingPanelProps> = ({ panel }) => {
           stacked. */}
       <div className="panel-content">
         <TerminalPanel
+          // TASK-156 / GH #101: include the per-pane refresh generation in
+          // the key so refreshTerminal() forces an xterm remount here too.
+          key={`${panel.terminalId}-${refreshGeneration}`}
           terminalId={panel.terminalId}
           floatTitleBar={{ onMouseDown: handleTitleBarMouseDown, onDoubleClick: handleMaximize }}
         />

@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.9.0
+
+A Sunday release focused on AI session quality-of-life and a big watcher-CPU win. Cross-instance state syncs now work properly, notifications got cleaner, and idle CPU drops from 4-6% to about 1%.
+
+### New Features
+
+- **Per-group "+ new session" button** in the AI Sessions panel - each repo group header has a + button that spawns a fresh Copilot session in that group's cwd (#105, thanks @AsafMah!).
+- **`Ctrl+Alt+R` refresh pane** - tears down and restarts the focused pane's PTY in place, preserving the title and cwd (#101, thanks @ofek01001!).
+- **`Ctrl+Insert` copies the selection** - third alias for Copy alongside `Ctrl+Shift+C` and the right-click menu (#102, thanks @dmitrykunn!).
+- **Drag-and-drop a file onto a terminal** writes the path into the prompt; multi-select dropping joins paths with spaces.
+- **Floating "jump to bottom" button** appears when you've scrolled up in any pane; click to snap back to the live tail.
+- **Wake / ping button per AI session** - a small icon in each session row writes a no-op so dormant sessions refresh their status.
+- **Sort menu radio rows + most-prompts sort** - the AI sessions sort menu now uses clean radio rows for Title / Activity / Prompts. Sorting by prompts is hidden when groups are visible since the group count shown is sessions-not-prompts and the ordering looked unrelated.
+- **Notification exclude list** - Settings → Notifications lets you maintain a list of strings; any AI notification whose title or body matches is silenced. Useful for users running an external hook in parallel.
+- **Auto-attach diagnostic log tail to Report-an-issue** - the GitHub issue body comes prefilled with the last ~25 KB of `tmax-diag.log` as a collapsible `<details>` block so we have repro context.
+- **Session list label disambiguation** - if multiple cwds end in the same leaf folder name (e.g. two folders both named `tmax`), labels expand to the shortest unique parent path.
+
+### Performance
+
+- **Idle CPU dropped from 4-6% to ~1%** - replaced the full-glob `usePolling: true` watchers with a three-tier strategy: native chokidar on the parent dir + 1s mtime poll over a 5-minute hot set + 10s stale sweep. WSL paths keep the old polling behavior since native watching is unreliable over `wsl.localhost` shares.
+- **AI session row memoization** - per-row component is `React.memo` with identity-stable props, so a single session update no longer re-renders the entire list. Cuts "Not Responding" pauses on busy 1500+ session boards.
+
+### Bug Fixes
+
+- **AI session rename is consistent across sidebar / tab title / Copilot `/rename`** - PR #106 (thanks @yoziv!) stitches all three together: workspace.yaml watcher routes the rename, the renderer's name override beats the linked terminal's customTitle, and a regression guard catches the prior TASK-88 issue.
+- **Cross-instance session state actually syncs** - when two tmax windows share the same userData (dev + packaged), changes in one would appear stale in the other because the cached session file wasn't being re-read on disk-change events. `SESSION_LOAD` now does a fresh disk read every call, so archives, renames, and pins propagate.
+- **Auto-link no longer poaches stale sessions** - opening a fresh AI pane in a folder with a long-running session used to steal the old session's title and last prompt. Auto-link now refuses sessions older than 30s when the new pane has process-tree-detected its own fresh AI.
+- **Group-by-repo toggle works regardless of sort mode** - the toggle was silently ignored when sorting by time. Now triggers a layout rebuild on every click.
+- **Escape key reaches the PTY in TUI apps** - a renderer keybinding was eating Escape before it reached your terminal. Now scoped to fire only when the prompt search dialog is open (#103, thanks @AsafMah!).
+- **No more notification flood at launch** - after the watcher rewrite, the initial scan was firing notifications for every active session at startup. Suppressed.
+- **Archived sessions stay archived across restarts** - the lifecycle override map wasn't applied on the SQLite-loaded fast path, so archived sessions reappeared as Active. Fixed.
+- **Cleanup low-prompt sessions persists across restarts** - the bulk archive was only updating memory; now writes through to disk.
+- **Title updates for wrapper-launched AI** - if you launched Copilot or Claude Code via an alias or wrapper script, the process-tree walker stopped at the wrapper's name. It now descends one more level (#99, #85, thanks @ronny8360988!).
+- **Settings → Shells "Add Shell" button works again** - the button was a no-op (#104, thanks @AsafMah!).
+- **Report an issue "Open GitHub" works again** - regressed when the diag-log auto-attach landed.
+- **"Show in AI sessions" highlight is now distinguishable from a click-selected row** - added a separate highlight style for the jump-to source.
+- **AI session search filter** - prefix matching now finds partial words like `add AND refr` → `refresh`.
+
+### Polish
+
+- **Cleaner notification titles** - removed special-case branding from notification titles. All notifications now use the underlying provider label (Copilot / Claude Code). Internal markers in the body are still scrubbed via `stripClawpilotContext`; just no branded title.
+- **Cross-session notification dedup** - wrappers that spawn two distinct sessions per turn (a Copilot + Claude Code pair) used to fire two identical notifications. An 8-second body-dedup window now collapses the duplicate.
+- **"DEV" pill in notification title** for dev builds, so you can tell which build surfaced the toast.
+
 ## v1.8.0
 
 A feature-heavy release. Headline additions: 12 theme presets, an AND-syntax across every filter box, a per-pane attention shimmer for waiting AI sessions, drag-reorderable workspace tabs, and SQLite-backed Copilot session loading for a much faster startup.

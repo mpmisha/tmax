@@ -10,15 +10,18 @@ import { KeybindingsFile } from './keybindings-file';
 import { IPC } from '../shared/ipc-channels';
 import { CopilotSessionMonitor } from './copilot-session-monitor';
 import { CopilotSessionWatcher } from './copilot-session-watcher';
-import { notifyCopilotSession, clearNotificationCooldowns, setAiSessionNotificationsEnabled, setNotificationClickHandler, setSessionNameOverrides } from './copilot-notification';
+import { notifyCopilotSession, clearNotificationCooldowns, setAiSessionNotificationsEnabled, setNotificationClickHandler, setSessionNameOverrides, setNotificationExcludeStrings } from './copilot-notification';
 import { ClaudeCodeSessionMonitor } from './claude-code-session-monitor';
 import { ClaudeCodeSessionWatcher } from './claude-code-session-watcher';
 import { WslSessionManager } from './wsl-session-manager';
 import { VersionChecker } from './version-checker';
-import { initDiagLogger, getDiagLogPath, diagLog, sanitize } from './diag-logger';
+import { initDiagLogger, getDiagLogPath, diagLog, sanitize, readDiagLogTail } from './diag-logger';
 import { GitDiffService, resolveGitRoot } from './git-diff-service';
 import { listWorktrees, createWorktree, deleteWorktree, getBranches } from './git-worktree-service';
+import { getDescendantNames } from './process-tree';
 import type { DiffMode } from '../shared/diff-types';
+import * as chokidar from 'chokidar';
+import type { FSWatcher } from 'chokidar';
 
 // Handle Squirrel.Windows lifecycle events (install, update, uninstall)
 // Must be at the top before any other initialization
@@ -393,6 +396,25 @@ function setupPtyManager(): void {
     onExit(id: string, exitCode: number | undefined) {
       broadcastPtyEvent(IPC.PTY_EXIT, id, exitCode);
     },
+    // TASK-158: lazy-start/stop the WSL session manager based on whether a
+    // WSL terminal is alive. Without this, the unconditional boot-time
+    // start() pinned vmmemWSL warm (1-1.4% CPU, ~800MB RAM) even for users
+    // who only ever opened pwsh / cmd terminals - the wsl.exe distro probe
+    // alone is enough to wake the WSL service, and the chokidar pollers
+    // over \\wsl.localhost keep it from idling out.
+    onWslActiveChanged(active: boolean) {
+      if (active) {
+        const cfgLimit = (configStore?.getAll() as any)?.aiSessionLoadLimit;
+        const initialLimit = typeof cfgLimit === 'number' && cfgLimit >= 0 ? cfgLimit : 314;
+        wslSessionManager?.start(initialLimit).catch((err) => {
+          console.error('WSL session manager lazy-start failed:', err);
+        });
+      } else {
+        wslSessionManager?.stop().catch((err) => {
+          console.error('WSL session manager lazy-stop failed:', err);
+        });
+      }
+    },
   });
 }
 
@@ -403,6 +425,47 @@ function setupConfigStore(): void {
   // plugin can disable in tmax-config.json without restarting their
   // notification stack.
   setAiSessionNotificationsEnabled(configStore.get('aiSessionNotifications') ?? true);
+  // TASK-156: seed the AI-session notification deny-list from saved config.
+  setNotificationExcludeStrings(configStore.get('notificationExcludeStrings') ?? []);
+}
+
+// TASK-163: chokidar watcher on tmax-session.json. When two tmax windows
+// share the same userData dir (the common case - same user on the same
+// machine), each Electron process keeps an independent in-memory copy of
+// session state. Without this, a rename / archive / pin in window A is
+// invisible to window B until B restarts. The watcher fires on every disk
+// write; we broadcast a no-payload event and let each renderer re-load
+// just the cross-window-syncable maps. To avoid feedback loops, the
+// renderer holds a "lastOwnSaveAt" timestamp set right before saveSession;
+// if the broadcast arrives within an ignore window AND the diffed maps
+// match what the renderer just wrote, it skips the reload.
+let sessionFileWatcher: FSWatcher | null = null;
+function setupSessionFileWatcher(): void {
+  if (NO_RESTORE) return;
+  const storeAny = sessionStore as unknown as { path?: string };
+  const sessionFilePath = storeAny.path
+    || path.join(app.getPath('userData'), 'tmax-session.json');
+  try {
+    sessionFileWatcher = chokidar.watch(sessionFilePath, {
+      ignoreInitial: true,
+      persistent: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 100,
+        pollInterval: 50,
+      },
+    });
+    sessionFileWatcher.on('change', () => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed()) continue;
+        win.webContents.send(IPC.SESSION_FILE_CHANGED);
+      }
+    });
+    sessionFileWatcher.on('error', (err) => {
+      console.warn('[session-file-watcher] error:', err);
+    });
+  } catch (err) {
+    console.warn('[session-file-watcher] setup failed:', err);
+  }
 }
 
 // TASK-71: seed the notification module's override cache directly from
@@ -551,12 +614,22 @@ function registerIpcHandlers(): void {
     return ptyManager?.getStats(id) ?? null;
   });
 
+  ipcMain.handle(IPC.PTY_GET_CHILD_PROCESSES, async (_event, id: string) => {
+    const pid = ptyManager?.getPid(id);
+    if (typeof pid !== 'number') return [];
+    return await getDescendantNames(pid);
+  });
+
   ipcMain.on(IPC.DIAG_LOG, (_event, event: string, data?: Record<string, unknown>) => {
     diagLog(event, data);
   });
 
   ipcMain.handle(IPC.DIAG_GET_LOG_PATH, () => {
     return getDiagLogPath();
+  });
+
+  ipcMain.handle(IPC.DIAG_READ_TAIL, async (_event, maxBytes?: number) => {
+    return readDiagLogTail(maxBytes);
   });
 
   ipcMain.handle(IPC.GET_SYSTEM_FONTS, async () => {
@@ -580,12 +653,19 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC.CONFIG_SET,
     (_event, key: string, value: unknown) => {
-      // Validate shell paths exist on disk to prevent injection of arbitrary executables
+      // Type guard only. A fs.existsSync check used to live here but it
+      // broke every UI flow that creates a shell ("+ Add Shell" writes a
+      // placeholder with path: '' before the user fills it in) and every
+      // keystroke when editing a path (intermediate strings don't exist
+      // on disk). Spawn-time validation at IPC.PTY_CREATE already verifies
+      // the path is in the configured profiles, and node-pty.spawn fails
+      // loudly on non-existent executables - so a broken path can't be
+      // used to launch anything anyway.
       if (key === 'shells' && Array.isArray(value)) {
         for (const shell of value) {
           if (shell && typeof shell === 'object' && 'path' in shell) {
-            if (typeof shell.path !== 'string' || !fs.existsSync(shell.path)) {
-              throw new Error(`Invalid shell path: ${shell.path}`);
+            if (typeof shell.path !== 'string') {
+              throw new Error(`Invalid shell path type: ${typeof shell.path}`);
             }
           }
         }
@@ -598,6 +678,12 @@ function registerIpcHandlers(): void {
       // without restarting the app.
       if (key === 'aiSessionNotifications') {
         setAiSessionNotificationsEnabled(value !== false);
+      }
+
+      // TASK-156: live-apply changes to the notification deny-list so
+      // editing it in Settings takes effect without restarting.
+      if (key === 'notificationExcludeStrings') {
+        setNotificationExcludeStrings(Array.isArray(value) ? value as string[] : []);
       }
 
       // Dynamically apply background material changes
@@ -687,6 +773,23 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.SESSION_LOAD, () => {
     if (NO_RESTORE) return null;
+    // electron-store caches the file in-memory at construction and never
+    // re-reads it on `get`. When two tmax instances share the same userData
+    // (e.g. dev + packaged), the cache goes stale as soon as the other
+    // instance writes. Fresh-read from disk so cross-window sync via
+    // SESSION_FILE_CHANGED actually sees the new state.
+    try {
+      const storeAny = sessionStore as unknown as { path?: string };
+      const sessionFilePath = storeAny.path
+        || path.join(app.getPath('userData'), 'tmax-session.json');
+      if (fs.existsSync(sessionFilePath)) {
+        const raw = fs.readFileSync(sessionFilePath, 'utf-8');
+        const parsed = JSON.parse(raw) as { session?: unknown };
+        return (parsed.session ?? null) as Record<string, unknown> | null;
+      }
+    } catch {
+      // Fall through to electron-store cache on parse/read failure.
+    }
     return sessionStore.get('session', null);
   });
 
@@ -1307,6 +1410,7 @@ app.whenReady().then(() => {
     setupConfigStore();
     console.log('Config store ready');
     seedSessionNameOverridesFromDisk();
+    setupSessionFileWatcher();
     if (process.env.TMAX_E2E === '1') {
       // TASK-71: expose a few notification helpers on `global` so e2e tests
       // can drive notifyCopilotSession directly via app.evaluate without
@@ -1314,6 +1418,17 @@ app.whenReady().then(() => {
       // file being written.
       (global as any).__notifyCopilotSession = notifyCopilotSession;
       (global as any).__clearNotificationCooldowns = clearNotificationCooldowns;
+      // TASK-156: let e2e drive the deny-list directly without round-tripping
+      // through the CONFIG_UPDATE IPC + electron-store.
+      (global as any).__setNotificationExcludeStrings = setNotificationExcludeStrings;
+      // TASK-153: drive a fresh CopilotSessionMonitor against a fixture
+      // sessions directory and return the scanned summaries. Lets tests
+      // exercise the loadSession first-prompt fallback (TASK-151) without
+      // having to replace the global monitor instance.
+      (global as any).__scanCopilotSessionsAtPath = async (basePath: string) => {
+        const m = new CopilotSessionMonitor({ basePath });
+        return await m.scanSessions();
+      };
     }
     setupKeybindingsFile();
     setupPtyManager();
@@ -1427,6 +1542,8 @@ app.on('window-all-closed', async () => {
   // if the files survive the close. Stale files are reaped by the 6h
   // per-file sweep in sweepStaleClipboardDirs() on next startup.
   ptyManager?.killAll();
+  try { await sessionFileWatcher?.close(); } catch { /* ignore */ }
+  sessionFileWatcher = null;
   await copilotWatcher?.stop();
   copilotMonitor?.dispose();
   await claudeCodeWatcher?.stop();

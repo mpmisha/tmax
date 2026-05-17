@@ -202,7 +202,11 @@ const DirPicker: React.FC = () => {
           <button className="context-menu-item" onClick={() => { window.terminalAPI.openPath(ctxMenu.dir); setCtxMenu(null); }}>
             Open in file explorer
           </button>
-          <button className="context-menu-item" onClick={() => { navigator.clipboard.writeText(ctxMenu.dir); setCtxMenu(null); }}>
+          <button className="context-menu-item" onClick={() => {
+            navigator.clipboard.writeText(ctxMenu.dir);
+            useTerminalStore.getState().addToast('Path copied to clipboard');
+            setCtxMenu(null);
+          }}>
             Copy path
           </button>
           <div className="context-menu-separator" />

@@ -3,6 +3,7 @@ import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dn
 import { CSS } from '@dnd-kit/utilities';
 import { useTerminalStore, TAB_COLORS } from '../state/terminal-store';
 import type { Workspace, WorkspaceId } from '../state/types';
+import { formatKeyForPlatform } from '../utils/platform';
 
 // Tab bar variant for tabMode === 'workspaces' (TASK-40). Each chip is a
 // workspace; clicking a chip switches the entire grid. + creates a new
@@ -407,7 +408,7 @@ const WorkspaceTabBar: React.FC<{ vertical?: boolean; side?: 'left' | 'right' }>
             closeMenu();
             useTerminalStore.getState().toggleSettings();
           }}>
-            Settings
+            Settings <span className="shortcut">{formatKeyForPlatform('Ctrl+,')}</span>
           </button>
           <div className="context-menu-separator" />
           {config && config.shells.length > 0 && (

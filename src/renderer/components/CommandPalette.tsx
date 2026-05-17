@@ -29,6 +29,8 @@ const CommandPalette: React.FC = () => {
       { id: 'closeTerminal', label: 'Close Terminal', shortcut: 'Ctrl+Shift+W', action: () => { const id = focusedId(); if (id) store().closeTerminal(id); } },
       { id: 'restoreClosedTerminal', label: 'Reopen Closed Pane', shortcut: 'Ctrl+Shift+T', action: () => store().restoreClosedTerminal() },
       { id: 'renameTerminal', label: 'Rename Terminal', shortcut: 'Ctrl+Shift+R', action: () => { const id = focusedId(); if (id) store().startRenaming(id); } },
+      { id: 'refreshPane', label: 'Refresh Pane', shortcut: 'Ctrl+Alt+R', action: () => { const id = focusedId(); if (id) store().refreshTerminal(id); } },
+      { id: 'replaceTerminal', label: 'New Terminal in Place', shortcut: 'Ctrl+Alt+N', action: () => { const id = focusedId(); if (id) store().replaceTerminal(id); } },
       { id: 'jumpToTerminal', label: 'Jump to Terminal', shortcut: 'Ctrl+Shift+G', action: () => store().toggleSwitcher() },
       { id: 'paneHints', label: 'Jump to Terminal by Hint', shortcut: 'Ctrl+Shift+J', action: () => store().togglePaneHints() },
       { id: 'tabMenu', label: 'Open Tab Menu', shortcut: 'Ctrl+Shift+M', action: () => store().openTabMenu() },

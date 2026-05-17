@@ -35,11 +35,19 @@ export interface PtyCreateOpts {
   env?: Record<string, string>;
   cols: number;
   rows: number;
+  // TASK-158: caller-supplied flag so the manager can track how many WSL
+  // PTYs are alive without re-parsing shell paths. The wiring in main.ts
+  // sets this from `opts.wslDistro != null || profile.path === 'wsl.exe'`.
+  isWsl?: boolean;
 }
 
 export interface PtyCallbacks {
   onData: (id: string, data: string) => void;
   onExit: (id: string, exitCode: number | undefined) => void;
+  // TASK-158: fires when the count of live WSL PTYs transitions across
+  // zero. Used by main.ts to lazy-start/stop the WslSessionManager so
+  // vmmemWSL isn't pinned alive when no WSL terminal is open.
+  onWslActiveChanged?: (active: boolean) => void;
 }
 
 // Electron injects env vars that break Node.js child processes (npm, npx, etc.)
@@ -92,9 +100,18 @@ export class PtyManager {
   private callbacks: PtyCallbacks;
   private pendingData = new Map<string, string>();
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  // TASK-158: track which PTY ids correspond to WSL shells. We fire
+  // onWslActiveChanged across the 0<->1 transitions so the WSL session
+  // manager can lazy-start when a WSL terminal opens and lazy-stop when
+  // the last one closes.
+  private wslPtyIds = new Set<string>();
 
   constructor(callbacks: PtyCallbacks) {
     this.callbacks = callbacks;
+  }
+
+  hasWslPty(): boolean {
+    return this.wslPtyIds.size > 0;
   }
 
   private scheduleBatchFlush(): void {
@@ -158,6 +175,16 @@ export class PtyManager {
 
     this.ptys.set(opts.id, ptyProcess);
     this.stats.set(opts.id, { pid: ptyProcess.pid, writeCount: 0, lastWriteTime: 0, dataCount: 0, lastDataTime: 0, dataBytes: 0 });
+    // TASK-158: register before firing onWslActiveChanged so the callback
+    // sees `hasWslPty() === true` if it queries us.
+    if (opts.isWsl) {
+      const wasEmpty = this.wslPtyIds.size === 0;
+      this.wslPtyIds.add(opts.id);
+      if (wasEmpty) {
+        try { this.callbacks.onWslActiveChanged?.(true); }
+        catch (err) { diagLog('pty:wsl-active-cb-failed', { error: String(err) }); }
+      }
+    }
     diagLog('pty:created', { id: opts.id, pid: ptyProcess.pid, shell: opts.shellPath, cwd });
     // CMD: relies on prompt regex fallback (no hook mechanism)
 
@@ -184,10 +211,22 @@ export class PtyManager {
       diagLog('pty:exit', { id: opts.id, exitCode });
       this.ptys.delete(opts.id);
       this.stats.delete(opts.id);
+      this.releaseWslSlot(opts.id);
       this.callbacks.onExit(opts.id, exitCode);
     });
 
     return { id: opts.id, pid: ptyProcess.pid };
+  }
+
+  // TASK-158: drop a PTY from the WSL set and notify on the N->0 edge.
+  // Centralized so kill() and the onExit handler both go through the same
+  // path - a missed call here means the manager stays warm forever.
+  private releaseWslSlot(id: string): void {
+    if (!this.wslPtyIds.delete(id)) return;
+    if (this.wslPtyIds.size === 0) {
+      try { this.callbacks.onWslActiveChanged?.(false); }
+      catch (err) { diagLog('pty:wsl-active-cb-failed', { error: String(err) }); }
+    }
   }
 
   write(id: string, data: string): void {
@@ -229,6 +268,7 @@ export class PtyManager {
       pty.kill();
       this.ptys.delete(id);
       this.pendingData.delete(id);
+      this.releaseWslSlot(id);
     }
   }
 
@@ -236,6 +276,7 @@ export class PtyManager {
     for (const [id, pty] of this.ptys) {
       pty.kill();
       this.ptys.delete(id);
+      this.releaseWslSlot(id);
     }
   }
 }

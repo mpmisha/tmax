@@ -46,6 +46,7 @@ export interface TerminalAPI {
   getPtyDiag(id: string): Promise<PtyDiag | null>;
   diagLog(event: string, data?: Record<string, unknown>): void;
   getDiagLogPath(): Promise<string>;
+  readDiagLogTail(maxBytes?: number): Promise<string>;
   getSystemFonts(): Promise<string[]>;
   // ── Keybindings file (TASK-39) ────────────────────────────────────
   getKeybindings(): Promise<{ key: string; action: string }[]>;
@@ -73,6 +74,10 @@ export interface TerminalAPI {
   getBranches(repoPath: string): Promise<string[]>;
   // ── Session name overrides sync (TASK-71) ─────────────────────────
   syncSessionNameOverrides(overrides: Record<string, string>): void;
+  // ── Cross-window session-file change broadcast (TASK-163) ─────────
+  onSessionFileChanged(cb: () => void): () => void;
+  // ── Child process tree query (TASK-171) ────────────────────────────
+  getPtyChildProcesses(ptyId: string): Promise<string[]>;
 }
 
 const terminalAPI: TerminalAPI = {
@@ -354,6 +359,10 @@ const terminalAPI: TerminalAPI = {
     return ipcRenderer.invoke(IPC.DIAG_GET_LOG_PATH);
   },
 
+  readDiagLogTail(maxBytes) {
+    return ipcRenderer.invoke(IPC.DIAG_READ_TAIL, maxBytes);
+  },
+
   getSystemFonts() {
     return ipcRenderer.invoke(IPC.GET_SYSTEM_FONTS);
   },
@@ -428,6 +437,20 @@ const terminalAPI: TerminalAPI = {
   // ── Session name overrides sync (TASK-71) ─────────────────────────
   syncSessionNameOverrides(overrides: Record<string, string>) {
     ipcRenderer.send(IPC.SESSION_NAME_OVERRIDES_SYNC, overrides);
+  },
+
+  // ── Cross-window session-file change broadcast (TASK-163) ─────────
+  onSessionFileChanged(cb: () => void): () => void {
+    const listener = () => cb();
+    ipcRenderer.on(IPC.SESSION_FILE_CHANGED, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.SESSION_FILE_CHANGED, listener);
+    };
+  },
+
+  // ── Child process tree query (TASK-171) ────────────────────────────
+  getPtyChildProcesses(ptyId: string) {
+    return ipcRenderer.invoke(IPC.PTY_GET_CHILD_PROCESSES, ptyId);
   },
 
 };

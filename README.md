@@ -22,6 +22,7 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Status indicators per pane (green = active, grey = idle, red = error)
 - Focused pane highlighted with green-tinted title bar
 - Status bar terminal count is clickable - opens a popover listing every terminal with its title, mode, and AI session status; click a row to focus it
+- Floating "jump to bottom" button appears when you scroll up in any pane; click to snap back to the live tail
 
 **Workspaces**
 - A tab is a workspace - each one keeps its own panes, layout, and color tint
@@ -53,7 +54,9 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Cross-session prompt search (`Ctrl+Shift+Y`) - search every prompt across every AI session, with `foo AND bar` syntax to require multiple terms. Results stream in progressively, with a jump glyph (↗ for live panes, ↑ for inactive sessions) on each row. Inactive sessions resume in a new pane on click
 - Filter tabs: All / Copilot / Claude Code; sidebar search by name, branch, cwd, or summary (also supports the AND syntax)
 - AI session shimmer: a soft border pulse on any pane whose AI session is waiting for your input, suppressed when you focus the pane. Useful peripheral cue on a multi-monitor setup. Toggle in Settings → Terminal
-- Native AI session notifications when Claude Code or Copilot CLI finishes a turn or asks for approval
+- Native AI session notifications when Claude Code or Copilot CLI finishes a turn or asks for approval, with a Settings → Notifications exclude list to silence specific titles or bodies
+- Per-group `+` button on each repo group header spawns a fresh Copilot session in that group's folder - faster than typing the resume command yourself
+- Wake / ping button per session row - writes a no-op so a dormant session refreshes its status
 - SQLite-backed Copilot session loading - reads Copilot CLI's local store directly for ~150ms startup on busy machines
 - Bulk Cleanup sessions - archive everything below a prompt-count threshold (pinned and already-archived sessions are skipped)
 - WSL session discovery — sessions from WSL distros appear with a distro badge
@@ -84,6 +87,8 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Jump to any terminal by name (`Ctrl+Shift+G`) - also supports the AND syntax
 - Pane hints for quick terminal switching (`Ctrl+Shift+J`)
 - Rename the focused pane in place with `Ctrl+Shift+R`
+- Refresh / restart the focused pane in place with `Ctrl+Alt+R` - tears down and respawns the PTY, preserving title and cwd
+- `Ctrl+Insert` copies the current selection - third alias alongside `Ctrl+Shift+C` and the right-click menu
 - Undo close pane / workspace (`Ctrl+Shift+T`) - 10-deep stack that restores cwd, title, color, and resumes the AI session if it's still in the live list. Confirms before restoring so an accidental keypress doesn't spawn PTYs unexpectedly
 - Split, move, resize, and navigate — all from the keyboard
 - Every shortcut is fully configurable
@@ -107,6 +112,7 @@ Built with Electron, React, TypeScript, xterm.js, and node-pty.
 - Drag to swap terminal positions
 - Drag to detach as floating panel
 - Visual drop zone labels showing exactly where the terminal will land
+- Drop a file (or multiple files) from File Explorer onto a terminal pane to write the path(s) into the prompt
 
 **Session Management**
 - Auto-save/restore on close, crash, or reboot (saves every 5 seconds)

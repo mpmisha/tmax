@@ -29,9 +29,19 @@ interface DistroPair {
 export class WslSessionManager {
   private pairs: DistroPair[] = [];
   private callbacks: WslSessionCallbacks = {};
+  // TASK-158: track started state so start() is idempotent. We lazy-start
+  // the manager whenever a WSL PTY is alive and stop() it when the last
+  // one exits; a stray double-start would push duplicate distro pairs into
+  // `this.pairs` and leak watchers / vmmemWSL handles.
+  private started = false;
+  private starting: Promise<void> | null = null;
 
   setCallbacks(callbacks: WslSessionCallbacks): void {
     this.callbacks = callbacks;
+  }
+
+  isStarted(): boolean {
+    return this.started;
   }
 
   /**
@@ -39,10 +49,26 @@ export class WslSessionManager {
    * in-memory cache (and fires onSessionAdded for each parsed session). Pass
    * the user's aiSessionLoadLimit so the cap is honored across both the
    * sync IPC path and the boot-side scan. 0 = skip the boot scan entirely.
+   *
+   * Idempotent: a second call while already started (or starting) is a no-op
+   * that resolves once the in-flight start completes. This lets callers
+   * naively call start() on every WSL PTY spawn without bookkeeping.
    */
   async start(initialLimit = 314): Promise<void> {
+    if (this.started) return;
+    if (this.starting) return this.starting;
     if (!isWslAvailable()) return;
 
+    this.starting = this.doStart(initialLimit);
+    try {
+      await this.starting;
+      this.started = true;
+    } finally {
+      this.starting = null;
+    }
+  }
+
+  private async doStart(initialLimit: number): Promise<void> {
     const distros = await getWslDistroInfo();
 
     for (const distro of distros) {
@@ -181,6 +207,12 @@ export class WslSessionManager {
   }
 
   async stop(): Promise<void> {
+    // TASK-158: wait for an in-flight start() before tearing down so a
+    // rapid spawn-then-close of a WSL terminal can't leave the watchers
+    // half-initialized.
+    if (this.starting) {
+      try { await this.starting; } catch { /* swallow - stop is best-effort */ }
+    }
     for (const pair of this.pairs) {
       await pair.copilotWatcher.stop();
       await pair.claudeWatcher.stop();
@@ -188,5 +220,6 @@ export class WslSessionManager {
       pair.claudeMonitor.dispose();
     }
     this.pairs = [];
+    this.started = false;
   }
 }

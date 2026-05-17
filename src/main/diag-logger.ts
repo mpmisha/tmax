@@ -1,4 +1,4 @@
-import { appendFile, writeFile, stat } from 'fs/promises';
+import { appendFile, writeFile, stat, open } from 'fs/promises';
 import { join } from 'path';
 import { app } from 'electron';
 
@@ -52,3 +52,36 @@ export function diagLog(event: string, data?: Record<string, unknown>): void {
 }
 
 export { sanitize };
+
+/**
+ * Read the last `maxBytes` of the diag log. Used by the Report-an-issue
+ * flow to auto-attach context (TASK-164). Flushes any buffered lines
+ * first so the tail includes everything up to "now". Returns '' if the
+ * file is missing or unreadable — the caller falls back to no attachment.
+ */
+export async function readDiagLogTail(maxBytes = 25 * 1024): Promise<string> {
+  if (!logPath) return '';
+  await flush();
+  try {
+    const s = await stat(logPath).catch(() => null);
+    if (!s) return '';
+    const start = Math.max(0, s.size - maxBytes);
+    const fh = await open(logPath, 'r');
+    try {
+      const buf = Buffer.alloc(s.size - start);
+      await fh.read(buf, 0, buf.length, start);
+      let text = buf.toString('utf-8');
+      // If we sliced mid-line, drop the leading partial so the first
+      // line in the output is a complete log entry.
+      if (start > 0) {
+        const nl = text.indexOf('\n');
+        if (nl >= 0) text = text.slice(nl + 1);
+      }
+      return text;
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return '';
+  }
+}

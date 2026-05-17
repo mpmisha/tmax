@@ -46,10 +46,15 @@ export interface CopilotSessionSummary {
 // template changes. Shared between main (notification labels) and renderer
 // (panel badge) so the magic string lives in one place.
 const CLAWPILOT_MARKER = '[clawpilot context:';
-// Continuation turns send a "Here is the conversation:\nuser: ...\nassistant: ..."
-// wrapper instead of the marker, and the marker can also be sliced out of
-// short summary/latestPrompt copies. The cwd path is the next-best
-// fingerprint because ClawPilot always launches in its own folder.
+// TASK-161: continuation-turn fingerprint. Continuation turns drop the
+// "[clawpilot context: ...]" marker entirely and prefix the prompt with
+// a "Here is the conversation:\nuser: ..." wrapper. We use this wrapper
+// as a marker-substitute - but only AS A SECONDARY signal alongside the
+// cwd check. cwd alone is not sufficient: plain Claude Code sessions
+// developed inside a /clawpilot/ folder (e.g. the user working on the
+// ClawPilot project itself) were getting falsely labelled as ClawPilot
+// toasts.
+const CLAWPILOT_CONTINUATION_MARKER = 'here is the conversation:\nuser:';
 const CLAWPILOT_CWD_SEGMENT = /(^|[/\\])clawpilot([/\\]|$)/i;
 
 export function detectSessionHost(session: Pick<CopilotSessionSummary, 'provider' | 'latestPrompt' | 'summary' | 'cwd'>): 'clawpilot' | null {
@@ -58,16 +63,62 @@ export function detectSessionHost(session: Pick<CopilotSessionSummary, 'provider
   // agnostic, so we only check for the magic string, not the provider.
   const haystack = `${session.latestPrompt ?? ''}\n${session.summary ?? ''}`.toLowerCase();
   if (haystack.includes(CLAWPILOT_MARKER)) return 'clawpilot';
-  if (session.cwd && CLAWPILOT_CWD_SEGMENT.test(session.cwd)) return 'clawpilot';
+  // Continuation-turn fallback (TASK-161 / follow-up):
+  //  - The wrapper text "Here is the conversation:\nuser:" identifies a
+  //    ClawPilot continuation. We accept it when it appears AT THE START
+  //    of latestPrompt or summary - that's where ClawPilot puts it. A user
+  //    pasting the same phrase mid-prompt won't match. This catches
+  //    ClawPilot sessions running outside a /clawpilot/ cwd folder.
+  //  - As a separate, weaker fallback, we still accept wrapper-anywhere
+  //    combined with a /clawpilot/ cwd. Either signal alone (cwd-alone,
+  //    or mid-text wrapper) is not enough.
+  const latestStart = (session.latestPrompt ?? '').trim().toLowerCase().slice(0, 64);
+  const summaryStart = (session.summary ?? '').trim().toLowerCase().slice(0, 64);
+  if (
+    latestStart.startsWith(CLAWPILOT_CONTINUATION_MARKER) ||
+    summaryStart.startsWith(CLAWPILOT_CONTINUATION_MARKER)
+  ) return 'clawpilot';
+  if (
+    session.cwd && CLAWPILOT_CWD_SEGMENT.test(session.cwd) &&
+    haystack.includes(CLAWPILOT_CONTINUATION_MARKER)
+  ) return 'clawpilot';
   return null;
 }
 
 // Strip the ClawPilot-injected "[Clawpilot context: Current date and time
-// is ...]" suffix from a prompt/summary string. Once a notification or
-// panel row already shows the session is from ClawPilot, the preamble is
-// noise. Case-insensitive; tolerates missing trailing bracket.
+// is ...]" suffix AND the "Here is the conversation:\nuser: ...\nassistant: ..."
+// continuation-turn wrapper from a prompt/summary string. Once a notification
+// or panel row already shows the session is from ClawPilot, the preamble /
+// transcript dump is just noise that buries the actual latest user prompt.
+// Case-insensitive; tolerates missing trailing bracket. (TASK-152)
 export function stripClawpilotContext(s: string): string {
-  return s.replace(/\s*\[clawpilot context:[\s\S]*$/i, '').trim();
+  let out = s.replace(/\s*\[clawpilot context:[\s\S]*$/i, '');
+  // Continuation-turn wrapper: ClawPilot replays the entire conversation
+  // before the new prompt as "Here is the conversation:\nuser: <prev>\n
+  // assistant: <prev>\nuser: <NEW>". The actual fresh prompt is the LAST
+  // "user:" segment, so keep only that. If no "user:" lines are present
+  // after the header (rare malformed payload), drop the header alone.
+  const headerMatch = out.match(/here is the conversation:\s*/i);
+  if (headerMatch) {
+    const afterHeader = out.slice((headerMatch.index ?? 0) + headerMatch[0].length);
+    const lastUserIdx = afterHeader.search(/(?:^|\n)\s*user:\s*/i);
+    if (lastUserIdx === -1) {
+      out = out.slice(0, headerMatch.index ?? 0);
+    } else {
+      // Find the LAST user: segment (not just the first).
+      const userRe = /(?:^|\n)\s*user:\s*/gi;
+      let lastMatch: RegExpExecArray | null = null;
+      let m: RegExpExecArray | null;
+      while ((m = userRe.exec(afterHeader)) !== null) lastMatch = m;
+      const start = (lastMatch?.index ?? 0) + (lastMatch?.[0].length ?? 0);
+      // Stop at the next assistant: turn if one follows, otherwise EOL/EOF.
+      const tail = afterHeader.slice(start);
+      const stopAt = tail.search(/\n\s*assistant:\s*/i);
+      const userPrompt = stopAt === -1 ? tail : tail.slice(0, stopAt);
+      out = (out.slice(0, headerMatch.index ?? 0) + userPrompt).trim();
+    }
+  }
+  return out.trim();
 }
 
 export interface CopilotWorkspaceMetadata {

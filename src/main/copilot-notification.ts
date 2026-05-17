@@ -1,5 +1,13 @@
-import { Notification } from 'electron';
+import { Notification, app } from 'electron';
+
+// TASK-159: appended to notification titles when running a dev tmax
+// (electron-forge start) so users with both a dev and packaged tmax open
+// at once can tell the toasts apart at a glance. No-op in packaged builds.
+const DEV_TITLE_SUFFIX = app.isPackaged ? '' : ' (DEV)';
+import * as path from 'path';
+import * as fs from 'fs';
 import type { CopilotSessionStatus, CopilotSessionSummary } from '../shared/copilot-types';
+import { stripClawpilotContext } from '../shared/copilot-types';
 
 // Short cooldown to debounce parser flicker within the SAME status
 // transition (e.g. file watcher re-emits the same waitingForUser tick
@@ -13,6 +21,32 @@ const FLICKER_COOLDOWN_MS = 5_000;
 const lastNotified = new Map<string, number>();
 const lastStatus = new Map<string, CopilotSessionStatus>();
 
+// TASK-164: cross-session body dedup. ClawPilot spawns two distinct
+// sessions per turn (a Claude Code SDK session + a parallel Copilot
+// session), and the per-session flicker cooldown above doesn't catch
+// them because their IDs differ. This window collapses duplicate-body
+// toasts that fire within DEDUP_WINDOW_MS, regardless of which session
+// produced them. Body is normalized (trim+lowercase+slice) so minor
+// whitespace differences don't defeat the match.
+const DEDUP_WINDOW_MS = 8_000;
+const DEDUP_BODY_PREFIX_LEN = 160;
+let recentBodyKeys: Array<{ key: string; time: number }> = [];
+function bodyDedupKey(body: string): string {
+  return body.trim().slice(0, DEDUP_BODY_PREFIX_LEN).toLowerCase().replace(/\s+/g, ' ');
+}
+function isDuplicateOfRecent(body: string): boolean {
+  if (!body) return false;
+  const now = Date.now();
+  // Drop expired entries.
+  recentBodyKeys = recentBodyKeys.filter((e) => now - e.time <= DEDUP_WINDOW_MS);
+  const key = bodyDedupKey(body);
+  return recentBodyKeys.some((e) => e.key === key);
+}
+function rememberBody(body: string): void {
+  if (!body) return;
+  recentBodyKeys.push({ key: bodyDedupKey(body), time: Date.now() });
+}
+
 // Per-process opt-out gate. Wired from main.ts based on the `aiSessionNotifications`
 // config flag (default true). When the flag is false we skip the OS notification
 // entirely - useful for users running an external hook plugin (e.g.
@@ -20,6 +54,42 @@ const lastStatus = new Map<string, CopilotSessionStatus>();
 let enabled = true;
 export function setAiSessionNotificationsEnabled(value: boolean): void {
   enabled = value;
+}
+
+// TASK-156: per-process cached copy of `notificationExcludeStrings`. Wired
+// from main.ts on startup and on every config change. Matching is a plain
+// case-insensitive substring against title OR body - intentionally no regex
+// or globs (kept simple to author and predictable when users paste in noisy
+// agent output). Empty / whitespace-only entries are ignored at match time
+// so the Settings textarea can keep blank rows while the user is typing.
+let excludeStrings: string[] = [];
+export function setNotificationExcludeStrings(values: readonly string[] | undefined | null): void {
+  excludeStrings = Array.isArray(values) ? values.slice() : [];
+}
+function isExcluded(title: string, body: string): boolean {
+  if (excludeStrings.length === 0) return false;
+  const haystackLower = `${title}\n${body}`.toLowerCase();
+  const haystackRaw = `${title}\n${body}`;
+  for (const raw of excludeStrings) {
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    // TASK-155: entries that start and end with "/" are treated as regex.
+    // Anything else stays a case-insensitive substring match (TASK-156).
+    // A malformed regex is ignored gracefully so users can keep typing
+    // without breaking notifications mid-edit.
+    if (trimmed.length >= 3 && trimmed.startsWith('/') && trimmed.endsWith('/')) {
+      const pattern = trimmed.slice(1, -1);
+      if (!pattern) continue;
+      try {
+        const re = new RegExp(pattern, 'i');
+        if (re.test(haystackRaw)) return true;
+      } catch { /* invalid regex - ignore this entry */ }
+      continue;
+    }
+    if (haystackLower.includes(trimmed.toLowerCase())) return true;
+  }
+  return false;
 }
 
 // Click handler injected from main.ts. We can't import mainWindow here
@@ -83,9 +153,29 @@ export function notifyCopilotSession(session: CopilotSessionSummary): void {
   const stateLabel = session.status === 'awaitingApproval'
     ? 'Approval Needed'
     : isClaude ? 'Session Ready' : 'Waiting for Input';
-  const title = `${agentLabel}: ${stateLabel}`;
+  const title = `${agentLabel} - ${stateLabel}${DEV_TITLE_SUFFIX}`;
 
   const body = buildNotificationBody(session);
+  const icon = resolveNotificationIcon(session.provider);
+
+  // TASK-156: user-configured deny-list. Drop the toast entirely if any
+  // exclude string matches the rendered title or body. We bail here -
+  // AFTER lastStatus was updated above so removing the rule won't fire
+  // a retroactive toast for the same turn, but BEFORE the E2E capture
+  // and notification.show() so tests can assert on suppression and
+  // suppressed turns make no sound. We intentionally do NOT extend this
+  // to version-checker.ts: update notifications should fire regardless
+  // of an exclude list aimed at AI agent noise.
+  if (isExcluded(title, body)) return;
+
+  // TASK-164: drop a near-identical body that already fired from a sibling
+  // session within DEDUP_WINDOW_MS. ClawPilot spawns a CC + Copilot pair
+  // per turn; the per-session cooldown above keys on session.id, so it
+  // can't see the cross-session duplicate. We dedup ONLY on body here -
+  // the same body from two different sessions in an 8s window is the
+  // ClawPilot pair shape.
+  if (isDuplicateOfRecent(body)) return;
+  rememberBody(body);
 
   // E2E test hook: capture every notification body main builds so tests
   // can assert on the override-vs-summary precedence without having to
@@ -97,7 +187,7 @@ export function notifyCopilotSession(session: CopilotSessionSummary): void {
     g.__capturedNotifications.push({ title, body });
   }
 
-  const notification = new Notification({ title, body });
+  const notification = new Notification({ title, body, icon });
   if (clickHandler) {
     notification.on('click', () => {
       try { clickHandler?.(); } catch { /* ignore */ }
@@ -133,10 +223,10 @@ function buildNotificationBody(session: CopilotSessionSummary): string {
 
   // Prefer summary (firstPrompt for active sessions). Skip if it's just
   // the auto-generated slug.
-  const summary = session.summary && session.summary !== session.slug
-    ? session.summary.trim().replace(/\s+/g, ' ')
+  const summaryClean = session.summary && session.summary !== session.slug
+    ? stripClawpilotContext(session.summary.trim().replace(/\s+/g, ' '))
     : '';
-  const rawName = override || summary || session.repository || cwdFolder || session.id.slice(0, 8);
+  const rawName = override || summaryClean || session.repository || cwdFolder || session.id.slice(0, 8);
   const NAME_MAX = 60;
   const displayName = rawName.length > NAME_MAX
     ? rawName.slice(0, NAME_MAX - 1) + '…'
@@ -147,14 +237,39 @@ function buildNotificationBody(session: CopilotSessionSummary): string {
   // Latest prompt, but skip when it's the same as the chosen displayName
   // (single-prompt sessions where summary === latestPrompt would otherwise
   // duplicate).
-  const prompt = (session.latestPrompt || '').trim().replace(/\s+/g, ' ');
-  if (prompt && prompt !== rawName) {
+  const promptClean = stripClawpilotContext((session.latestPrompt || '').trim().replace(/\s+/g, ' '));
+  if (promptClean && promptClean !== rawName) {
     const PROMPT_MAX = 80;
-    const truncated = prompt.length > PROMPT_MAX ? prompt.slice(0, PROMPT_MAX - 1) + '…' : prompt;
+    const truncated = promptClean.length > PROMPT_MAX ? promptClean.slice(0, PROMPT_MAX - 1) + '…' : promptClean;
     parts.push(`"${truncated}"`);
   }
 
   return parts.join('\n');
+}
+
+/**
+ * Resolve a per-provider icon path for the Electron Notification. Missing
+ * files silently fall back to the app's own icon - we don't want a broken
+ * notification just because an asset is missing.
+ */
+function resolveNotificationIcon(
+  provider: CopilotSessionSummary['provider'] | undefined,
+): string | undefined {
+  let fileName: string | null = null;
+  if (provider === 'claude-code') fileName = 'claude.png';
+  else if (provider === 'copilot') fileName = 'copilot.png';
+  if (!fileName) return undefined;
+  const candidates = [
+    path.join(app.getAppPath(), 'assets', fileName),
+    path.join(process.resourcesPath || '', 'assets', fileName),
+    path.join(__dirname, '..', '..', 'assets', fileName),
+  ];
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) return p;
+    } catch { /* ignore */ }
+  }
+  return undefined;
 }
 
 function deriveCwdFolder(cwd: string | undefined): string {
@@ -167,4 +282,5 @@ function deriveCwdFolder(cwd: string | undefined): string {
 export function clearNotificationCooldowns(): void {
   lastNotified.clear();
   lastStatus.clear();
+  recentBodyKeys = [];
 }

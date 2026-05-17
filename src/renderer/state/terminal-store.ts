@@ -983,6 +983,14 @@ interface TerminalStore {
   // archive without applying any change. Used to populate the
   // confirmation dialog. (TASK-37)
   countLowPromptSessions: (threshold: number) => number;
+  // Distribution of session counts by messageCount for the cleanup dialog
+  // (TASK-162). Returns an array of length maxBucket + 2:
+  //   - index 0 = sessions with messageCount === 0
+  //   - index i (1..maxBucket) = sessions with messageCount === i
+  //   - index maxBucket + 1 = overflow (messageCount > maxBucket)
+  // Excludes pinned and already-archived sessions to match the cleanup
+  // behavior, so the user picks a threshold against the same pool.
+  lowPromptHistogram: (maxBucket: number) => number[];
   togglePinSession: (sessionId: string) => void;
   checkStaleActiveSessions: () => void;
   addToast: (message: string) => void;
@@ -4165,7 +4173,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if ((lifecycle === 'completed' || lifecycle === 'old') && oldSession) {
       const hasLinkedTerminal = [...get().terminals.values()].some((t) => t.aiSessionId === session.id);
       if (hasLinkedTerminal) {
-        const hasNewActivity = session.status !== 'idle' || session.messageCount > oldSession.messageCount;
+        // TASK-162: status alone isn't a reliable "new activity" signal -
+        // a session reloaded from disk in 'thinking' / 'waitingForUser' state
+        // matches `status !== 'idle'` on the first watcher tick after restart
+        // and bumps just-archived sessions back to Active. Compare strictly
+        // on messageCount: a real new turn is the only thing the user means
+        // by "reactivate this".
+        const hasNewActivity = session.messageCount > oldSession.messageCount;
         if (hasNewActivity) {
           get().setSessionLifecycle(session.id, 'active');
           const name = get().sessionNameOverrides[session.id] || session.summary || session.id.slice(0, 8);
@@ -4244,7 +4258,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if ((lifecycle === 'completed' || lifecycle === 'old') && oldSession) {
       const hasLinkedTerminal = [...get().terminals.values()].some((t) => t.aiSessionId === session.id);
       if (hasLinkedTerminal) {
-        const hasNewActivity = session.status !== 'idle' || session.messageCount > oldSession.messageCount;
+        // TASK-162: status alone isn't a reliable "new activity" signal -
+        // a session reloaded from disk in 'thinking' / 'waitingForUser' state
+        // matches `status !== 'idle'` on the first watcher tick after restart
+        // and bumps just-archived sessions back to Active. Compare strictly
+        // on messageCount: a real new turn is the only thing the user means
+        // by "reactivate this".
+        const hasNewActivity = session.messageCount > oldSession.messageCount;
         if (hasNewActivity) {
           get().setSessionLifecycle(session.id, 'active');
           const name = get().sessionNameOverrides[session.id] || session.summary || session.id.slice(0, 8);
@@ -4346,6 +4366,21 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       if (s.messageCount < threshold) count++;
     }
     return count;
+  },
+
+  lowPromptHistogram: (maxBucket: number) => {
+    if (!Number.isFinite(maxBucket) || maxBucket <= 0) return [];
+    const cap = Math.floor(maxBucket);
+    const buckets = new Array(cap + 2).fill(0) as number[];
+    const { copilotSessions, claudeCodeSessions, sessionPinned, sessionLifecycleOverrides } = get();
+    for (const s of [...copilotSessions, ...claudeCodeSessions]) {
+      if (sessionPinned[s.id]) continue;
+      if (sessionLifecycleOverrides[s.id]) continue;
+      const mc = typeof s.messageCount === 'number' && s.messageCount >= 0 ? s.messageCount : 0;
+      if (mc > cap) buckets[cap + 1]++;
+      else buckets[mc]++;
+    }
+    return buckets;
   },
 
   cleanupLowPromptSessions: (threshold: number) => {

@@ -6,6 +6,7 @@ import { runJumpToPromptSearch } from '../utils/jump-to-prompt';
 import { renderWithMdLinks } from '../utils/md-link-parser';
 import { tokenizeAnd, matchesAllTokens } from '../../shared/and-filter';
 import type { CopilotSessionSummary, CopilotSessionStatus, SessionProvider, SessionLifecycle } from '../../shared/copilot-types';
+import { detectSessionHost, stripClawpilotContext } from '../../shared/copilot-types';
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 600;
@@ -29,23 +30,30 @@ const STATUS_LABELS: Record<CopilotSessionStatus, string> = {
 
 type FilterTab = 'all' | 'copilot' | 'claude-code';
 type LifecycleTab = 'active' | 'completed' | 'old';
-type SortMode = 'activity' | 'time-desc' | 'time-asc';
-type GroupOrder = 'activity' | 'alpha';
-
-const SORT_MODE_LABEL: Record<SortMode, string> = {
-  activity: 'by activity',
-  'time-desc': 'newest first',
-  'time-asc': 'oldest first',
-};
-const SORT_MODE_CYCLE: Record<SortMode, SortMode> = {
-  activity: 'time-desc',
-  'time-desc': 'time-asc',
-  'time-asc': 'activity',
-};
-const GROUP_ORDER_LABEL: Record<GroupOrder, string> = {
-  activity: 'by activity',
-  alpha: 'alphabetical',
-};
+type SortColumn = 'title' | 'activity' | 'prompts';
+type SortDir = 'asc' | 'desc';
+type SortMode =
+  | 'title-asc' | 'title-desc'
+  | 'time-desc' | 'time-asc'
+  | 'prompts-desc' | 'prompts-asc';
+function sortModeToColumn(mode: SortMode): SortColumn {
+  if (mode === 'title-asc' || mode === 'title-desc') return 'title';
+  if (mode === 'prompts-asc' || mode === 'prompts-desc') return 'prompts';
+  return 'activity';
+}
+function sortModeToDir(mode: SortMode): SortDir {
+  return mode.endsWith('-asc') ? 'asc' : 'desc';
+}
+function columnDefault(col: SortColumn): SortMode {
+  if (col === 'title') return 'title-asc';
+  if (col === 'prompts') return 'prompts-desc';
+  return 'time-desc';
+}
+function flipMode(mode: SortMode): SortMode {
+  return (sortModeToDir(mode) === 'asc'
+    ? mode.replace('-asc', '-desc')
+    : mode.replace('-desc', '-asc')) as SortMode;
+}
 
 function isActiveStatus(status: CopilotSessionStatus): boolean {
   return status !== 'idle';
@@ -67,6 +75,45 @@ function shortPath(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
+// TASK-163: build a cwd → display-label map for the sessions list, where
+// colliding leaves expand to the shortest unique suffix path. e.g. given
+//   C:\projects\Clawpilot
+//   C:\Users\me\Documents\Clawpilot
+//   C:\projects\tmax
+// the map returns:
+//   C:\projects\Clawpilot              -> "projects\Clawpilot"
+//   C:\Users\me\Documents\Clawpilot    -> "Documents\Clawpilot"
+//   C:\projects\tmax                   -> "tmax"
+// Case-folded comparison so the Windows-style "Clawpilot" vs "clawpilot"
+// collision still collapses (they're the same folder on Windows).
+function buildCwdDisambig(cwds: ReadonlyArray<string | undefined>): Map<string, string> {
+  const partsOf = (cwd: string) => cwd.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean);
+  const unique = new Set<string>();
+  for (const c of cwds) { if (c) unique.add(c); }
+  const cwdParts = new Map<string, string[]>();
+  for (const cwd of unique) cwdParts.set(cwd, partsOf(cwd));
+
+  const result = new Map<string, string>();
+  for (const cwd of unique) {
+    const parts = cwdParts.get(cwd)!;
+    const cwdLower = cwd.toLowerCase();
+    let chosen: string | null = null;
+    for (let n = 1; n <= parts.length; n++) {
+      const suffix = parts.slice(parts.length - n).join('\\');
+      const suffixLower = suffix.toLowerCase();
+      let conflict = false;
+      for (const [other, otherParts] of cwdParts) {
+        if (other.toLowerCase() === cwdLower) continue;
+        const otherSuffix = otherParts.slice(Math.max(0, otherParts.length - n)).join('\\').toLowerCase();
+        if (otherSuffix === suffixLower) { conflict = true; break; }
+      }
+      if (!conflict) { chosen = suffix; break; }
+    }
+    result.set(cwd, chosen ?? parts.join('\\'));
+  }
+  return result;
+}
+
 // Treat session summaries as missing when they're pure structural noise.
 // AI providers occasionally emit summaries like "|-" (a tree-render
 // artifact when the first response was think-only / cancelled), single
@@ -81,7 +128,10 @@ function isMeaninglessSummary(summary: string): boolean {
 }
 
 function getTitle(s: CopilotSessionSummary): string {
-  if (s.summary && !isMeaninglessSummary(s.summary)) return s.summary;
+  if (s.summary && !isMeaninglessSummary(s.summary)) {
+    // Strip ClawPilot's prompt preamble so it doesn't dominate the title.
+    return stripClawpilotContext(s.summary) || s.summary;
+  }
   if (s.cwd) return shortPath(s.cwd);
   if (s.repository) return shortPath(s.repository);
   return s.id.slice(0, 8);
@@ -96,23 +146,40 @@ function sortSessions(
   sessions: CopilotSessionSummary[],
   openSessionIds: Set<string>,
   pinned: Record<string, true>,
-  sortMode: SortMode = 'activity',
+  sortMode: SortMode = 'time-desc',
 ): CopilotSessionSummary[] {
   return [...sessions].sort((a, b) => {
     // Pinned sessions float to the top regardless of sort mode.
     const aPin = pinned[a.id] ? 1 : 0;
     const bPin = pinned[b.id] ? 1 : 0;
     if (aPin !== bPin) return bPin - aPin;
-    if (sortMode === 'activity') {
-      // Open-in-tmax beats stale; otherwise by recency.
+    if (sortMode === 'time-desc') {
+      // Smart-sort behavior carried over from the old 'activity' mode:
+      // sessions open in tmax float above non-open ones at the same activity
+      // tier so the user's working set stays glued to the top of newest-first.
       const aOpen = openSessionIds.has(a.id) ? 1 : 0;
       const bOpen = openSessionIds.has(b.id) ? 1 : 0;
       if (aOpen !== bOpen) return bOpen - aOpen;
       return (b.lastActivityTime || 0) - (a.lastActivityTime || 0);
     }
-    const at = a.lastActivityTime || 0;
-    const bt = b.lastActivityTime || 0;
-    return sortMode === 'time-desc' ? bt - at : at - bt;
+    if (sortMode === 'time-asc') {
+      const at = a.lastActivityTime || 0;
+      const bt = b.lastActivityTime || 0;
+      return at - bt;
+    }
+    if (sortMode === 'prompts-desc' || sortMode === 'prompts-asc') {
+      const ap = a.messageCount || 0;
+      const bp = b.messageCount || 0;
+      if (ap !== bp) return sortMode === 'prompts-desc' ? bp - ap : ap - bp;
+      // Tie-break by recency so equal-count sessions remain meaningfully ordered.
+      return (b.lastActivityTime || 0) - (a.lastActivityTime || 0);
+    }
+    // title-asc / title-desc
+    const atitle = getTitle(a);
+    const btitle = getTitle(b);
+    const cmp = atitle.localeCompare(btitle, undefined, { sensitivity: 'base' });
+    if (cmp !== 0) return sortMode === 'title-asc' ? cmp : -cmp;
+    return (b.lastActivityTime || 0) - (a.lastActivityTime || 0);
   });
 }
 
@@ -134,6 +201,11 @@ const CopilotPanel: React.FC = () => {
   const prevFocusedIdRef = useRef<string | null>(null);
   const prevHighlightRequestRef = useRef<number>(0);
   const pendingHighlightRef = useRef<string | null>(null);
+  // TASK-166: transient flash applied to the row when 'Show in AI sessions'
+  // fires programmatically, so the user gets a distinct cue from a normal
+  // click-selection (which also adds .selected).
+  const [flashedSessionId, setFlashedSessionId] = useState<string | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track which AI session IDs have open terminals
   const openSessionIds = useMemo(() => {
@@ -248,35 +320,38 @@ const CopilotPanel: React.FC = () => {
   const config = useTerminalStore((s) => s.config);
   const oldSessionDays = (config as any)?.oldSessionDays ?? 30;
 
-  // #69: Group sessions by cwd's folder name. Default on; persisted in config
-  // so users who explicitly turn it off stay off across restarts.
   const groupByRepo = (config as any)?.aiGroupByRepo !== false;
-  // TASK-135: list-level sort mode + group-order, both persisted.
-  // sortMode: 'activity' (default - pinned/open/recency, optionally grouped),
-  //           'time-desc' / 'time-asc' (flat by lastActivityTime; pinned still float).
-  // groupOrder applies only when groupByRepo is on AND sortMode is 'activity':
-  //   'activity' (default) sorts groups by their newest member; 'alpha' sorts by name.
   const sortMode: SortMode = (() => {
     const v = (config as any)?.aiSessionListSortMode;
-    return v === 'time-desc' || v === 'time-asc' || v === 'activity' ? v : 'activity';
+    // Silent in-memory migration: the old 'activity' smart-sort is now folded
+    // into 'time-desc' (open-in-tmax bubbles above non-open of the same tier).
+    // Don't write the new value back unless the user clicks - the old key
+    // keeps working for anyone who hasn't touched their config since.
+    if (v === 'activity') return 'time-desc';
+    if (
+      v === 'time-desc' || v === 'time-asc' ||
+      v === 'prompts-desc' || v === 'prompts-asc' ||
+      v === 'title-asc' || v === 'title-desc'
+    ) return v;
+    return 'time-desc';
   })();
-  // Default group order is alphabetical - users scan the list by repo name
-  // more often than by group-recency. Within each group, sessions still sort
-  // by activity (sortSessions is unchanged below).
-  const groupOrder: GroupOrder = ((config as any)?.aiGroupByRepoOrder === 'activity') ? 'activity' : 'alpha';
-  const cycleSortMode = () => {
-    useTerminalStore.getState().updateConfig({ aiSessionListSortMode: SORT_MODE_CYCLE[sortMode] } as any);
+  const sortColumn = sortModeToColumn(sortMode);
+  const sortDir = sortModeToDir(sortMode);
+  const setSortMode = (next: SortMode) => {
+    useTerminalStore.getState().updateConfig({ aiSessionListSortMode: next } as any);
   };
-  const toggleGroupOrder = () => {
-    useTerminalStore.getState().updateConfig({ aiGroupByRepoOrder: groupOrder === 'alpha' ? 'activity' : 'alpha' } as any);
+  const onHeaderClick = (col: SortColumn) => {
+    if (sortColumn === col) setSortMode(flipMode(sortMode));
+    else setSortMode(columnDefault(col));
   };
-  // TASK-35: case-fold the grouping key so cwds that differ only in case
-  // (e.g. C:\projects\ClawPilot vs ...\clawpilot - same Windows folder)
-  // collapse into one group. Display name (rendered in the header) is
-  // tracked separately and preserves the casing of the first session in
-  // the bucket.
-  const repoDisplay = (s: CopilotSessionSummary): string => shortPath(s.cwd || '') || '(no repo)';
-  const repoKey = (s: CopilotSessionSummary): string => repoDisplay(s).toLowerCase();
+  // TASK-35 / TASK-163: group key uses the FULL cwd, case-folded. This
+  // collapses cwds that differ only in case (same folder on Windows) while
+  // keeping sessions in distinct folders that happen to share a leaf name
+  // (e.g. C:\projects\Clawpilot vs C:\dev\Clawpilot) in separate groups.
+  // Display label runs through the cwdDisambig map so colliding leaves
+  // get a parent-prefix to tell them apart.
+  const repoDisplay = (s: CopilotSessionSummary): string => cwdLabel(s.cwd) || '(no repo)';
+  const repoKey = (s: CopilotSessionSummary): string => (s.cwd || '').toLowerCase() || '(no repo)';
   // Pinned sessions get their own top-level pseudo-group so they sit above
   // every repo group, regardless of which repo they belong to.
   const PINNED_GROUP = '📌 Pinned';
@@ -313,13 +388,25 @@ const CopilotPanel: React.FC = () => {
 
   // Merge, deduplicate, and filter sessions
   const filtered = useMemo(() => {
+    // TASK-162 perf: preserve session identity when no transform is needed.
+    // The previous version did `{ ...s, provider: ... }` on every entry plus
+    // `{ ...s, summary: override }` on every entry, allocating fresh objects
+    // for all ~1500 sessions on every store update. Now we only spread when
+    // the entry actually needs mutation (missing provider OR has an override),
+    // so unchanged sessions keep referential identity through the filter.
+    // Row-level React.memo can then short-circuit on prop-identity (TASK-170).
+    const enrichProvider = (s: CopilotSessionSummary, fallback: 'copilot' | 'claude-code') =>
+      s.provider ? s : { ...s, provider: fallback };
     let all = [
-      ...copilotSessions.filter((s) => s.messageCount > 0).map((s) => ({ ...s, provider: s.provider || 'copilot' as const })),
-      ...claudeCodeSessions.filter((s) => s.messageCount > 0).map((s) => ({ ...s, provider: s.provider || 'claude-code' as const })),
+      ...copilotSessions.filter((s) => s.messageCount > 0).map((s) => enrichProvider(s, 'copilot')),
+      ...claudeCodeSessions.filter((s) => s.messageCount > 0).map((s) => enrichProvider(s, 'claude-code')),
     ].map((s) => {
-      // If user has a sidebar override, use it
+      // Sidebar override wins (user renamed in the sidebar directly).
       if (summaryOverrides[s.id]) return { ...s, summary: summaryOverrides[s.id] };
-      // If a linked terminal has a custom title (user renamed via tab), derive from it
+      // PR-#106: when a linked terminal has a deliberate user rename
+      // (customTitle && !aiAutoTitle), derive the sidebar display name
+      // from the terminal title so tab renames show up in the sidebar
+      // without needing the renderer to also write a summary override.
       for (const [, t] of terminals) {
         if (t.aiSessionId === s.id && t.customTitle && !t.aiAutoTitle) {
           return { ...s, summary: t.title };
@@ -356,16 +443,23 @@ const CopilotPanel: React.FC = () => {
     return sortSessions(lifecycleFiltered, openSessionIds, pinnedSessions, sortMode);
   }, [copilotSessions, claudeCodeSessions, query, filterTab, showRunningOnly, summaryOverrides, terminals, lifecycleTab, getSessionLifecycle, openSessionIds, pinnedSessions, sortMode]);
 
+  // TASK-163: disambiguate display labels for cwds that share a leaf folder
+  // name. Computed once per visible-session-set change; consumed by both the
+  // group header and the per-row cwd subtitle. Falls back to shortPath when
+  // a cwd isn't in the map (defensive; map should be exhaustive).
+  const cwdDisambig = useMemo(() => buildCwdDisambig(filtered.map((s) => s.cwd)), [filtered]);
+  const cwdLabel = (cwd: string | undefined): string => {
+    if (!cwd) return '';
+    return cwdDisambig.get(cwd) ?? shortPath(cwd);
+  };
+
   // #69: when groupByRepo is on, reorder filtered so sessions sharing a cwd
-  // folder are contiguous. Group order depends on `groupOrder`:
-  //   - 'activity' (default): groups by their most-recent member.
-  //   - 'alpha': groups by case-insensitive group key.
-  // TASK-135: when sortMode is time-* the group reorder is bypassed entirely
-  // so the user gets a true cross-folder time list. Pinned still float (the
-  // PINNED pseudo-group is achieved through the pinned-first sort in
-  // sortSessions, not via groupByRepo).
+  // folder are contiguous. Both group order AND within-group order follow
+  // the active column header (title / activity / prompts) and direction.
+  // Within-group order is already applied by sortSessions on `filtered`;
+  // here we sort the groups themselves the same way.
   const displayList = useMemo(() => {
-    if (!groupByRepo || sortMode !== 'activity') return filtered;
+    if (!groupByRepo) return filtered;
     const groups = new Map<string, CopilotSessionSummary[]>();
     for (const s of filtered) {
       const key = effectiveRepoKey(s);
@@ -373,18 +467,38 @@ const CopilotPanel: React.FC = () => {
       if (bucket) bucket.push(s); else groups.set(key, [s]);
     }
     const sortedGroups = [...groups.entries()].sort(([ak, av], [bk, bv]) => {
-      // Pinned group always at the top; no-repo bucket always at the bottom.
+      // Pinned group always at the top; no-repo bucket always at the bottom,
+      // regardless of which column header is active.
       if (ak === PINNED_GROUP_KEY) return -1;
       if (bk === PINNED_GROUP_KEY) return 1;
       if (ak === '(no repo)') return 1;
       if (bk === '(no repo)') return -1;
-      if (groupOrder === 'alpha') return ak.localeCompare(bk);
+      if (sortColumn === 'title') {
+        // Sort by the visible group label (disambiguated leaf, e.g. "tmax")
+        // rather than the full lowercased cwd key, otherwise the user sees
+        // labels like PROJECTS / BACKLOG-HUB / TMAX shuffled by their hidden
+        // parent paths.
+        const aLabel = effectiveRepoDisplay(av[0]);
+        const bLabel = effectiveRepoDisplay(bv[0]);
+        const cmp = aLabel.localeCompare(bLabel, undefined, { sensitivity: 'base' });
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      if (sortColumn === 'prompts') {
+        const aSum = av.reduce((acc, s) => acc + (s.messageCount || 0), 0);
+        const bSum = bv.reduce((acc, s) => acc + (s.messageCount || 0), 0);
+        if (aSum !== bSum) return sortDir === 'desc' ? bSum - aSum : aSum - bSum;
+        // Tie-break by recency so equal-sum groups stay meaningfully ordered.
+        const aRecent = Math.max(...av.map((s) => s.lastActivityTime || 0));
+        const bRecent = Math.max(...bv.map((s) => s.lastActivityTime || 0));
+        return bRecent - aRecent;
+      }
+      // activity column: group recency.
       const aRecent = Math.max(...av.map((s) => s.lastActivityTime || 0));
       const bRecent = Math.max(...bv.map((s) => s.lastActivityTime || 0));
-      return bRecent - aRecent;
+      return sortDir === 'desc' ? bRecent - aRecent : aRecent - bRecent;
     });
     return sortedGroups.flatMap(([, group]) => group);
-  }, [filtered, groupByRepo, pinnedSessions, sortMode, groupOrder]);
+  }, [filtered, groupByRepo, pinnedSessions, sortMode, sortColumn, sortDir]);
 
   // TASK-35: per-group display label (preserves original casing from the
   // first session encountered in each lowercase bucket).
@@ -487,6 +601,18 @@ const CopilotPanel: React.FC = () => {
     const session = [...store.copilotSessions, ...store.claudeCodeSessions].find((s) => s.id === aiSessionId);
     if (!session) return;
 
+    // TASK-166: only flash when triggered by an explicit highlight request
+    // (the user clicked "Show in AI sessions"), not on every focus change.
+    // requestChanged is the edge signal that distinguishes the two.
+    if (requestChanged) {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      setFlashedSessionId(aiSessionId);
+      flashTimerRef.current = setTimeout(() => {
+        setFlashedSessionId(null);
+        flashTimerRef.current = null;
+      }, 4000);
+    }
+
     // Clear filters that would hide the target row entirely. Without
     // this, setSelectedIndex picks the right idx in displayList but the
     // matching .ai-session-item never renders - the user sees a stale
@@ -532,6 +658,12 @@ const CopilotPanel: React.FC = () => {
       }
     }
   }, [focusedTerminalId, aiSessionHighlightRequest, show, lifecycleTab, filtered, getSessionLifecycle, showRunningOnly, query, filterTab]);
+
+  // Clear any pending flash timer on unmount so we don't try to setState
+  // on an unmounted component.
+  useEffect(() => () => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+  }, []);
 
   // Resolve a pending highlight after a tab switch has re-rendered `filtered`.
   useEffect(() => {
@@ -783,7 +915,7 @@ const CopilotPanel: React.FC = () => {
       <div className="dir-panel-header">
         <span>✨ AI Sessions</span>
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', position: 'relative' }}>
-          {groupByRepo && sortMode === 'activity' && (() => {
+          {groupByRepo && (() => {
             const allKeys = Array.from(groupSizes.keys());
             const allCollapsed = allKeys.length > 0 && allKeys.every((k) => collapsedGroups.has(k));
             const disabled = allKeys.length === 0;
@@ -854,29 +986,6 @@ const CopilotPanel: React.FC = () => {
                   <span style={{ display: 'inline-block', width: 16, color: groupByRepo ? 'var(--focus-border, #89b4fa)' : 'transparent' }}>✓</span>
                   Group by repo
                 </button>
-                {/* TASK-135: cycle sort mode (activity / newest / oldest).
-                    Stays open so the user can cycle without re-opening. */}
-                <button
-                  className="context-menu-item"
-                  onClick={() => { cycleSortMode(); }}
-                  title="Click to cycle: by activity -> newest first -> oldest first"
-                >
-                  <span style={{ display: 'inline-block', width: 16 }}>↕</span>
-                  Sort: {SORT_MODE_LABEL[sortMode]}
-                </button>
-                {/* TASK-135: alpha vs activity ordering for the group headers,
-                    only meaningful when grouping is on and sort mode is
-                    activity (time-sort flattens the list). */}
-                {groupByRepo && sortMode === 'activity' && (
-                  <button
-                    className="context-menu-item"
-                    onClick={() => { toggleGroupOrder(); }}
-                    title="Toggle group header order"
-                  >
-                    <span style={{ display: 'inline-block', width: 16 }}>↧</span>
-                    Group order: {GROUP_ORDER_LABEL[groupOrder]}
-                  </button>
-                )}
                 <button
                   className="context-menu-item"
                   onClick={() => { setShowRunningOnly((v) => !v); setHeaderMenuOpen(false); }}
@@ -907,6 +1016,16 @@ const CopilotPanel: React.FC = () => {
         const projectedCount = valid
           ? useTerminalStore.getState().countLowPromptSessions(threshold)
           : 0;
+        // TASK-162: per-prompt-count distribution so the user can pick a
+        // threshold against the actual shape of their session pool. Use a
+        // fixed cap of 15; sessions with >15 prompts land in the overflow
+        // bucket and are never archived by this dialog regardless of cap.
+        const HISTO_CAP = 15;
+        const histogram = useTerminalStore.getState().lowPromptHistogram(HISTO_CAP);
+        const histoMax = Math.max(1, ...histogram);
+        // Threshold-aware labelling: a bucket at messageCount === i is
+        // archived iff i < threshold (matches cleanupLowPromptSessions).
+        const isArchivedBucket = (idx: number) => valid && idx <= HISTO_CAP && idx < threshold;
         return (
           <div
             style={{
@@ -918,7 +1037,7 @@ const CopilotPanel: React.FC = () => {
               style={{
                 background: 'var(--bg-secondary, #1e1e2e)', color: 'var(--fg, #cdd6f4)',
                 border: '1px solid var(--border, #45475a)', borderRadius: 6, padding: 20,
-                minWidth: 340, maxWidth: 420, boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                minWidth: 420, maxWidth: 500, boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 10 }}>🧹 Cleanup low-prompt sessions</div>
@@ -949,12 +1068,65 @@ const CopilotPanel: React.FC = () => {
                   border: '1px solid var(--border, #45475a)', borderRadius: 4, fontSize: 14,
                 }}
               />
-              <div style={{ fontSize: 12, opacity: 0.8, marginTop: 10, minHeight: 18 }}>
+              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 10, minHeight: 18 }}>
                 {!valid
                   ? <span style={{ color: '#f38ba8' }}>Enter a positive number.</span>
                   : projectedCount === 0
                     ? <span>No sessions match (none below {threshold}, or matches are pinned / already archived).</span>
                     : <span>Will archive <strong>{projectedCount}</strong> session{projectedCount === 1 ? '' : 's'} with fewer than {threshold} prompts.</span>}
+              </div>
+              <div style={{ marginTop: 12, marginBottom: 6 }}>
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                  Sessions by prompt count (red = archived at this threshold)
+                </div>
+                <div
+                  style={{
+                    display: 'flex', alignItems: 'flex-end', gap: 2,
+                    height: 60, padding: '4px 0',
+                    borderBottom: '1px solid var(--border, #45475a)',
+                  }}
+                  role="img"
+                  aria-label={`Prompt-count distribution, ${projectedCount} sessions below threshold ${threshold}`}
+                >
+                  {histogram.map((count, idx) => {
+                    const isOverflow = idx === HISTO_CAP + 1;
+                    const label = isOverflow ? `${HISTO_CAP + 1}+` : String(idx);
+                    const archived = isArchivedBucket(idx);
+                    const barHeightPct = Math.max(count > 0 ? 12 : 0, Math.round((count / histoMax) * 100));
+                    return (
+                      <div
+                        key={idx}
+                        title={`${count} session${count === 1 ? '' : 's'} with ${label} prompt${label === '1' ? '' : 's'}`}
+                        style={{
+                          flex: 1, display: 'flex', flexDirection: 'column',
+                          alignItems: 'center', justifyContent: 'flex-end',
+                          height: '100%', minWidth: 0,
+                        }}
+                      >
+                        <div style={{ fontSize: 9, opacity: count > 0 ? 0.85 : 0.4, lineHeight: 1 }}>
+                          {count > 0 ? count : ''}
+                        </div>
+                        <div
+                          style={{
+                            width: '100%', marginTop: 2,
+                            height: `${barHeightPct}%`,
+                            background: archived ? '#f38ba8' : 'var(--accent, #7aa2f7)',
+                            opacity: count > 0 ? (archived ? 0.9 : 0.6) : 0.15,
+                            borderRadius: '2px 2px 0 0',
+                            transition: 'background 0.12s, opacity 0.12s',
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: 2, fontSize: 9, opacity: 0.55, marginTop: 2 }}>
+                  {histogram.map((_, idx) => (
+                    <div key={idx} style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
+                      {idx === HISTO_CAP + 1 ? `${HISTO_CAP + 1}+` : idx}
+                    </div>
+                  ))}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
                 <button className="ai-session-tab" onClick={() => setCleanupModal(null)}>Cancel</button>
@@ -1034,6 +1206,28 @@ const CopilotPanel: React.FC = () => {
         </div>
       )}
 
+      <div className="ai-session-sort-header" role="row">
+        {((groupByRepo ? ['title', 'activity'] : ['title', 'activity', 'prompts']) as SortColumn[]).map((col) => {
+          const active = sortColumn === col;
+          const glyph = active ? (sortDir === 'asc' ? '↑' : '↓') : '';
+          const label = col === 'title' ? 'Title' : col === 'activity' ? 'Activity' : 'Prompts';
+          return (
+            <button
+              key={col}
+              type="button"
+              role="columnheader"
+              aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+              className={`ai-session-sort-header-col${active ? ' active' : ''} col-${col}`}
+              onClick={() => onHeaderClick(col)}
+              data-column={col}
+            >
+              <span className="ai-session-sort-header-label">{label}</span>
+              {glyph && <span className="ai-session-sort-header-glyph">{glyph}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="dir-panel-list" ref={listRef}>
         {displayList.slice(0, renderLimit).map((session, index) => {
           const title = getTitle(session);
@@ -1048,9 +1242,7 @@ const CopilotPanel: React.FC = () => {
           const itemStyle = paneColor ? { borderLeft: `3px solid ${paneColor}` } : undefined;
           const currentRepo = effectiveRepoKey(session);
           const prevRepo = index > 0 ? effectiveRepoKey(displayList[index - 1]) : null;
-          // TASK-135: time-sort mode produces a flat cross-folder list; no
-          // group headers / collapse should render even if groupByRepo is on.
-          const groupingActive = groupByRepo && sortMode === 'activity';
+          const groupingActive = groupByRepo;
           const showGroupHeader = groupingActive && currentRepo !== prevRepo;
           const isCollapsed = groupingActive && collapsedGroups.has(currentRepo);
           const headerLabel = groupDisplayNames.get(currentRepo) || currentRepo;
@@ -1071,12 +1263,34 @@ const CopilotPanel: React.FC = () => {
                   </span>
                   <span className="ai-session-group-name">{headerLabel}</span>
                   <span className="ai-session-group-count">{groupSizes.get(currentRepo) || 0}</span>
+                  {/* TASK-159: per-group "+ new session" affordance. Always
+                      spawns a Copilot session (uses the configured
+                      copilotCommand from settings if set, defaults to
+                      `copilot`). cwd + wsl flags come from the most-recent
+                      session in the group. Stop propagation so the click
+                      doesn't also toggle the group's collapsed state. */}
+                  {session.cwd && (
+                    <button
+                      className="ai-session-group-new"
+                      title={`New Copilot session in ${session.cwd}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        useTerminalStore.getState().createAiSessionInCwd(
+                          'copilot',
+                          session.cwd,
+                          { wsl: session.wsl, wslDistro: session.wslDistro },
+                        );
+                      }}
+                    >
+                      +
+                    </button>
+                  )}
                 </div>
               )}
               {!isCollapsed && <>
             <div
               style={itemStyle}
-              className={`ai-session-item${index === selectedIndex ? ' selected' : ''}${selectedSessionIds.has(session.id) ? ' multi-selected' : ''}${active ? ' active' : ''}${isPaneActive ? ' pane-active' : ''}`}
+              className={`ai-session-item${index === selectedIndex ? ' selected' : ''}${selectedSessionIds.has(session.id) ? ' multi-selected' : ''}${active ? ' active' : ''}${isPaneActive ? ' pane-active' : ''}${flashedSessionId === session.id ? ' flashing' : ''}`}
               onClick={(e) => {
                 setSelectedIndex(index);
                 if (e.ctrlKey || e.metaKey) {
@@ -1128,10 +1342,15 @@ const CopilotPanel: React.FC = () => {
                       {session.wslDistro || 'WSL'}
                     </span>
                   )}
+                  {detectSessionHost(session) === 'clawpilot' && (
+                    <span className="ai-host-badge ai-host-clawpilot" title="Surfaced from ClawPilot (detected via prompt marker)">
+                      ClawPilot
+                    </span>
+                  )}
                   {time && <span className="ai-session-time">{time}</span>}
                 </div>
                 {session.cwd && (
-                  <div className="ai-session-cwd" title={session.cwd}>{shortPath(session.cwd)}</div>
+                  <div className="ai-session-cwd" title={session.cwd}>{cwdLabel(session.cwd)}</div>
                 )}
                 {active && (
                   <div className="ai-session-status" style={{ color: STATUS_COLORS[session.status] }}>
@@ -1253,7 +1472,21 @@ const CopilotPanel: React.FC = () => {
           </button>
           {ctxMenu.session.cwd && (
             <>
-              <button className="context-menu-item" onClick={() => { navigator.clipboard.writeText(ctxMenu.session.cwd); setCtxMenu(null); }}>
+              <button className="context-menu-item" onClick={() => {
+                useTerminalStore.getState().createAiSessionInCwd(
+                  'copilot',
+                  ctxMenu.session.cwd!,
+                  { wsl: ctxMenu.session.wsl, wslDistro: ctxMenu.session.wslDistro },
+                );
+                setCtxMenu(null);
+              }}>
+                ➕ New Copilot session here
+              </button>
+              <button className="context-menu-item" onClick={() => {
+                navigator.clipboard.writeText(ctxMenu.session.cwd!);
+                useTerminalStore.getState().addToast('Path copied to clipboard');
+                setCtxMenu(null);
+              }}>
                 📋 Copy path
               </button>
               <button className="context-menu-item" onClick={() => { (window.terminalAPI as any).openPath(ctxMenu.session.cwd); setCtxMenu(null); }}>
@@ -1286,7 +1519,11 @@ const CopilotPanel: React.FC = () => {
             );
           })()}
           <div className="context-menu-separator" />
-          <button className="context-menu-item" onClick={() => { navigator.clipboard.writeText(ctxMenu.session.id); setCtxMenu(null); }}>
+          <button className="context-menu-item" onClick={() => {
+            navigator.clipboard.writeText(ctxMenu.session.id);
+            useTerminalStore.getState().addToast('Session ID copied to clipboard');
+            setCtxMenu(null);
+          }}>
             🔗 Copy session ID
           </button>
           <button className="context-menu-item danger" onClick={() => handleRemoveSession(ctxMenu.session)}>
