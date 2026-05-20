@@ -201,6 +201,8 @@ export interface TerminalConfig {
 
 export type BackgroundMaterial = 'none' | 'auto' | 'mica' | 'acrylic' | 'tabbed';
 
+import type { PaneSummaryConfig } from '../../shared/pane-summary-types';
+
 export interface AppConfig {
   shells: ShellProfile[];
   defaultShellId: string;
@@ -217,6 +219,8 @@ export interface AppConfig {
   hideTabCloseButtons?: boolean;
   backgroundMaterial?: BackgroundMaterial;
   backgroundOpacity?: number; // 0.0–1.0, default 0.8
+  /** AI-distilled 1-line pane summary feature; see PaneSummaryConfig. */
+  paneSummary?: PaneSummaryConfig;
 }
 
 // ── Drag & drop ──────────────────────────────────────────────────────
