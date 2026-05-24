@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useTerminalStore } from '../state/terminal-store';
+import { useTerminalStore, getEffectiveCwd, getSessionProvider } from '../state/terminal-store';
 import { tokenizeAnd, matchesAllTokens } from '../../shared/and-filter';
 import type {
   DiffMode,
@@ -404,30 +404,21 @@ const DiffReview: React.FC = () => {
   const diffReviewMode = useTerminalStore(s => s.diffReviewMode);
   const closeDiffReview = useTerminalStore(s => s.closeDiffReview);
   const setDiffReviewMode = useTerminalStore(s => s.setDiffReviewMode);
-  // Prefer the AI session's CWD when the terminal is linked to an active session.
-  // The CLI changes directory internally without emitting OSC sequences, so
-  // terminal.cwd (shell CWD) stays stale. The session monitor tracks the real
-  // working directory via workspace metadata. Falls back to shell CWD when no
-  // AI session is linked. See: https://github.com/yoziv/tmax/issues/3
-  const terminalCwd = useTerminalStore(s => {
-    const t = diffReviewTerminalId ? s.terminals.get(diffReviewTerminalId) : null;
-    if (!t) return '';
-    if (t.aiSessionId) {
-      const sess = s.copilotSessions.find(x => x.id === t.aiSessionId)
-                ?? s.claudeCodeSessions.find(x => x.id === t.aiSessionId);
-      if (sess?.cwd) return sess.cwd;
-    }
-    return t.cwd ?? '';
-  });
+  const terminalCwd = useTerminalStore(s =>
+    getEffectiveCwd(
+      diffReviewTerminalId ? s.terminals.get(diffReviewTerminalId) : undefined,
+      s.copilotSessions,
+      s.claudeCodeSessions,
+    )
+  );
   const agentLabel = useTerminalStore(s => {
     if (!diffReviewTerminalId) return 'Agent';
     const t = s.terminals.get(diffReviewTerminalId);
     if (!t) return 'Agent';
     // Primary: check session lists via aiSessionId (authoritative)
-    if (t.aiSessionId) {
-      if (s.copilotSessions.some(x => x.id === t.aiSessionId)) return 'Copilot';
-      if (s.claudeCodeSessions.some(x => x.id === t.aiSessionId)) return 'Claude';
-    }
+    const provider = getSessionProvider(s.copilotSessions, s.claudeCodeSessions, t.aiSessionId);
+    if (provider === 'copilot') return 'Copilot';
+    if (provider === 'claude-code') return 'Claude';
     // Fallback: process/title heuristic (before session linking completes)
     const proc = (t.lastProcess ?? '').toLowerCase();
     const title = (t.title ?? '').toLowerCase();

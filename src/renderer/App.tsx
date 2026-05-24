@@ -4,7 +4,7 @@ import {
   DragOverlay,
   pointerWithin,
 } from '@dnd-kit/core';
-import { useTerminalStore } from './state/terminal-store';
+import { useTerminalStore, getEffectiveCwd, findSessionById, getSessionProvider } from './state/terminal-store';
 import { getTerminalEntry } from './terminal-registry';
 import { applyChromeFromTheme } from './utils/theme-presets';
 import type { CopilotSessionSummary } from '../shared/copilot-types';
@@ -145,6 +145,11 @@ const App: React.FC = () => {
 
     (window as any).__terminalStore = useTerminalStore;
     (window as any).__getTerminalEntry = getTerminalEntry;
+    // Exposed for e2e tests so specs can exercise the real helper from a
+    // browser context (where ESM/CJS require() is unavailable).
+    (window as any).__getEffectiveCwd = getEffectiveCwd;
+    (window as any).__findSessionById = findSessionById;
+    (window as any).__getSessionProvider = getSessionProvider;
 
     // Ctrl+wheel (Cmd+wheel on Mac): zoom the terminal font instead of letting
     // Chromium do its CSS page-zoom. preventDefault MUST happen before the

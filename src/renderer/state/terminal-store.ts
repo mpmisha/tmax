@@ -33,6 +33,63 @@ function validateSessionId(id: string): boolean {
 
 type SessionProvider = 'copilot' | 'claude-code';
 
+// ── Shared session/CWD helpers ─────────────────────────────────────
+// Centralizes the "find session by ID across both provider arrays" pattern
+// so callers don't hardcode provider-specific array names. When a third
+// provider is added, only these helpers need updating.
+
+/**
+ * Find a session by ID across all provider session lists.
+ * Returns the session summary or null if not found.
+ */
+export function findSessionById(
+  copilotSessions: CopilotSessionSummary[],
+  claudeCodeSessions: CopilotSessionSummary[],
+  sessionId: string,
+): CopilotSessionSummary | null {
+  return copilotSessions.find(x => x.id === sessionId)
+      ?? claudeCodeSessions.find(x => x.id === sessionId)
+      ?? null;
+}
+
+/**
+ * Resolve which provider owns a given session ID. Returns the provider
+ * tag or undefined when no provider has a matching session. Pairs with
+ * {@link findSessionById} for sites that need only the provider, not
+ * the full session object.
+ */
+export function getSessionProvider(
+  copilotSessions: CopilotSessionSummary[],
+  claudeCodeSessions: CopilotSessionSummary[],
+  sessionId: string | undefined,
+): 'copilot' | 'claude-code' | undefined {
+  if (!sessionId) return undefined;
+  if (copilotSessions.some((s) => s.id === sessionId)) return 'copilot';
+  if (claudeCodeSessions.some((s) => s.id === sessionId)) return 'claude-code';
+  return undefined;
+}
+
+/**
+ * Resolve the effective working directory for a terminal.
+ * Prefers the linked AI session's CWD when the session is active (not idle),
+ * falling back to the terminal's shell CWD otherwise. This avoids stale
+ * session CWDs overriding the shell's real directory after the CLI exits.
+ *
+ * See: https://github.com/yoziv/tmax/issues/3
+ */
+export function getEffectiveCwd(
+  terminal: TerminalInstance | undefined,
+  copilotSessions: CopilotSessionSummary[],
+  claudeCodeSessions: CopilotSessionSummary[],
+): string {
+  if (!terminal) return '';
+  if (terminal.aiSessionId) {
+    const sess = findSessionById(copilotSessions, claudeCodeSessions, terminal.aiSessionId);
+    if (sess?.cwd && sess.status !== 'idle') return sess.cwd;
+  }
+  return terminal.cwd ?? '';
+}
+
 /**
  * Capture the bits of a TerminalInstance that the undo-close stack
  * needs to recreate an equivalent pane (TASK-112). Provider for AI
@@ -44,14 +101,7 @@ function snapshotPaneForRestore(
   copilotSessions: CopilotSessionSummary[],
   claudeCodeSessions: CopilotSessionSummary[],
 ): ClosedPaneSnapshot {
-  let aiProvider: 'copilot' | 'claude-code' | undefined;
-  if (instance.aiSessionId) {
-    if (copilotSessions.some((s) => s.id === instance.aiSessionId)) {
-      aiProvider = 'copilot';
-    } else if (claudeCodeSessions.some((s) => s.id === instance.aiSessionId)) {
-      aiProvider = 'claude-code';
-    }
-  }
+  const aiProvider = getSessionProvider(copilotSessions, claudeCodeSessions, instance.aiSessionId);
   return {
     title: instance.title,
     customTitle: instance.customTitle,
@@ -3102,10 +3152,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       if (!t) return '';
       if (t.aiSessionId && config) {
         if (!validateSessionId(t.aiSessionId)) return '';
-        const isCopilot = copilotSessions.some((s) => s.id === t.aiSessionId);
-        if (isCopilot) return buildResumeCommand(config, 'copilot', t.aiSessionId);
-        const isClaude = claudeCodeSessions.some((s) => s.id === t.aiSessionId);
-        if (isClaude) return buildResumeCommand(config, 'claude-code', t.aiSessionId);
+        const provider = getSessionProvider(copilotSessions, claudeCodeSessions, t.aiSessionId);
+        if (provider) return buildResumeCommand(config, provider, t.aiSessionId);
       }
       return t.startupCommand || '';
     }
@@ -4074,8 +4122,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         if (t.aiSessionId && id !== focusedTerminalId) continue;
         if (t.aiSessionId) {
           const { copilotSessions: cs, claudeCodeSessions: ccs } = get();
-          const prevSession = cs.find((s) => s.id === t.aiSessionId)
-            || ccs.find((s) => s.id === t.aiSessionId);
+          const prevSession = findSessionById(cs, ccs, t.aiSessionId);
           if (prevSession && prevSession.status !== 'idle') continue;
         }
         // TASK-154 guard: if the pane has a process-tree stamp, only
@@ -4597,15 +4644,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       let cmd = t.startupCommand;
       if (!cmd && t.aiSessionId) {
         if (!validateSessionId(t.aiSessionId)) continue;
-        const isCopilot = copilotSessions.some((s) => s.id === t.aiSessionId);
-        if (isCopilot) {
-          cmd = buildResumeCommand(config, 'copilot', t.aiSessionId);
-        } else {
-          const isClaude = claudeCodeSessions.some((s) => s.id === t.aiSessionId);
-          if (isClaude) {
-            cmd = buildResumeCommand(config, 'claude-code', t.aiSessionId);
-          }
-        }
+        const provider = getSessionProvider(copilotSessions, claudeCodeSessions, t.aiSessionId);
+        if (provider) cmd = buildResumeCommand(config, provider, t.aiSessionId);
       }
       if (cmd) {
         window.terminalAPI.writePty(id, cmd + '\r');
