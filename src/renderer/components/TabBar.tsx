@@ -72,6 +72,17 @@ const Tab: React.FC<TabProps> = ({
     if (!aiSessionId) return null;
     return findSessionById(s.copilotSessions, s.claudeCodeSessions, aiSessionId)?.status ?? null;
   });
+  // Show the AI session's own summary as the tab's hover tooltip so a user
+  // can read the full session topic without renaming the tab. We use the
+  // native browser tooltip via the `title` attribute - no custom UI.
+  // Source: row.summary for Copilot, firstPrompt-derived summary for
+  // Claude. When empty, no tooltip shows.
+  const aiSessionSummary = useTerminalStore((s) => {
+    if (!aiSessionId) return null;
+    const session = findSessionById(s.copilotSessions, s.claudeCodeSessions, aiSessionId);
+    const raw = session?.summary?.trim();
+    return raw && raw !== title ? raw : null;
+  });
   const needsAttention = aiStatus === 'waitingForUser' || aiStatus === 'awaitingApproval';
   const isThinking = aiStatus === 'thinking' || aiStatus === 'executingTool';
 
@@ -111,6 +122,7 @@ const Tab: React.FC<TabProps> = ({
       className={className}
       style={style}
       data-tab-id={terminalId}
+      title={aiSessionSummary || undefined}
       onClick={(e) => {
         if (isMac ? e.metaKey : e.ctrlKey) {
           const store = useTerminalStore.getState();
