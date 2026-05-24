@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import { parseSessionEvents, clearParserCache, extractCopilotPrompts } from './copilot-events-parser';
 import { CopilotSessionDB, sessionRowToSummary } from './copilot-session-db';
 import { tokenizeAnd, matchesAllTokens } from '../shared/and-filter';
+import { SUMMARIZER_SESSION_NAME_PREFIX } from '../shared/pane-summary-types';
 import type {
   CopilotSession,
   CopilotSessionSummary,
@@ -50,6 +51,13 @@ export class CopilotSessionMonitor {
     return this.basePath;
   }
 
+  /** Returns true when a session row from SQLite or filesystem belongs to
+   *  the pane-summary feature's sandboxed summarizer spawn. Filtered out
+   *  of all UI surfaces. See src/main/pane-summary-service.ts. */
+  private isSummarizerSessionRow(row: { summary?: string }): boolean {
+    return !!row.summary && row.summary.startsWith(SUMMARIZER_SESSION_NAME_PREFIX);
+  }
+
   async scanSessions(limit = 314): Promise<CopilotSessionSummary[]> {
     // Try SQLite first (9-15x faster than filesystem scan)
     if (this.dbAvailable === null) {
@@ -89,6 +97,10 @@ export class CopilotSessionMonitor {
     const currentIds = new Set<string>();
 
     for (const row of sessionRows) {
+      // Skip our own summarizer-spawned sessions (Task pane-summary).
+      // They appear with `summary: tmax-summarizer:<uuid>` because the
+      // CLI mirrors `-n` into the DB summary field.
+      if (this.isSummarizerSessionRow(row)) continue;
       currentIds.add(row.id);
       const turnStats = turnStatsMap.get(row.id);
       const summary = sessionRowToSummary(row, turnStats);
@@ -206,6 +218,11 @@ export class CopilotSessionMonitor {
       const session = this.loadSession(sessionId, sessionDir);
 
       if (session) {
+        // Skip our own summarizer-spawned sessions (Task pane-summary).
+        if (session.workspace?.name?.startsWith(SUMMARIZER_SESSION_NAME_PREFIX)
+            || session.workspace?.summary?.startsWith(SUMMARIZER_SESSION_NAME_PREFIX)) {
+          continue;
+        }
         this.sessions.set(sessionId, session);
         const summary = this.toSummary(session);
         summaries.push(summary);
@@ -295,6 +312,7 @@ export class CopilotSessionMonitor {
 
         const results: CopilotSessionSummary[] = [];
         for (const row of searchRows) {
+          if (this.isSummarizerSessionRow(row)) continue;
           const turnStats = turnStatsMap?.get(row.id);
           const summary = sessionRowToSummary(row, turnStats);
 
@@ -394,6 +412,11 @@ export class CopilotSessionMonitor {
     }
     const session = this.loadSession(sessionId, sessionDir);
     if (session) {
+      // Skip our own summarizer sessions (Task pane-summary).
+      if (session.workspace?.name?.startsWith(SUMMARIZER_SESSION_NAME_PREFIX)
+          || session.workspace?.summary?.startsWith(SUMMARIZER_SESSION_NAME_PREFIX)) {
+        return;
+      }
       this.sessions.set(sessionId, session);
       this.callbacks.onSessionAdded?.(this.toSummary(session));
     }

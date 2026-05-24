@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useTerminalStore, TAB_COLORS } from '../state/terminal-store';
 import type { TerminalId } from '../state/types';
 import TabContextMenu, { type ContextMenuPosition } from './TabContextMenu';
+import PaneSummaryTooltip from './PaneSummaryTooltip';
 import { isMac } from '../utils/platform';
 
 interface TabProps {
@@ -33,15 +34,39 @@ const Tab: React.FC<TabProps> = ({
   const [renameValue, setRenameValue] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const terminal = useTerminalStore((s) => s.terminals.get(terminalId));
+  // AI summary as tab title (Task pane-summary): when the pane has a
+  // linked AI session and we have a ready summary, and the user hasn't
+  // explicitly renamed the session, use the AI summary as the visible
+  // title. CSS already truncates with ellipsis; PaneSummaryTooltip
+  // below shows the full text on hover.
+  //
+  // Source of truth for "user renamed this session" is
+  // sessionNameOverrides[aiSessionId] - this is the only place where
+  // an explicit user rename for an AI session lives. The
+  // customTitle/aiAutoTitle flags on TerminalInstance can be true for
+  // a number of reasons (OSC titles, first-command auto-rename, etc.)
+  // and aren't a reliable signal here.
+  const aiSummaryText = useTerminalStore(
+    (s) => s.paneSummaries[terminalId]?.status === 'ready'
+      ? s.paneSummaries[terminalId].text
+      : null,
+  );
+  const sessionWasRenamedByUser = useTerminalStore((s) => {
+    const sid = terminal?.aiSessionId;
+    return !!sid && !!s.sessionNameOverrides[sid];
+  });
+  const displayTitle = sessionWasRenamedByUser ? title : (aiSummaryText || title);
+
   useEffect(() => {
     if (isRenaming) {
-      setRenameValue(title);
+      setRenameValue(displayTitle);
       requestAnimationFrame(() => {
         inputRef.current?.focus();
         inputRef.current?.select();
       });
     }
-  }, [isRenaming, title]);
+  }, [isRenaming, displayTitle]);
 
   const handleRenameSubmit = useCallback(() => {
     if (renameValue.trim()) {
@@ -56,7 +81,6 @@ const Tab: React.FC<TabProps> = ({
     if (e.key === 'Escape') useTerminalStore.getState().startRenaming(null);
   }, [handleRenameSubmit]);
 
-  const terminal = useTerminalStore((s) => s.terminals.get(terminalId));
   const isDormant = terminal?.mode === 'dormant';
   const isDetached = terminal?.mode === 'detached';
   const tabColor = terminal?.tabColor;
@@ -154,7 +178,9 @@ const Tab: React.FC<TabProps> = ({
       ) : (
         <>
           {isInGrid && viewMode === 'grid' && <span className="tab-split-dot" />}
-          <span className="tab-title">{title}</span>
+          <PaneSummaryTooltip terminalId={terminalId}>
+            <span className="tab-title">{displayTitle}</span>
+          </PaneSummaryTooltip>
         </>
       )}
       {showCloseBtn && (
