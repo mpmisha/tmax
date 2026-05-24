@@ -52,30 +52,20 @@ function injectTerminal(window: any, opts: { termId: string; sessId?: string; cw
 
 function evalEffectiveCwd(window: any, termId: string) {
   return window.evaluate(({ termId }: any) => {
-    // Import the helper from the store module
-    const { getEffectiveCwd } = require('../src/renderer/state/terminal-store');
-    if (typeof getEffectiveCwd === 'function') {
-      const s = (window as any).__terminalStore.getState();
-      const t = s.terminals.get(termId);
-      return getEffectiveCwd(t, s.copilotSessions, s.claudeCodeSessions);
-    }
-    // Fallback: replicate the logic inline (packaged app may not have require)
-    const s = (window as any).__terminalStore.getState();
+    const w = window as any;
+    const s = w.__terminalStore.getState();
     const t = s.terminals.get(termId);
-    if (!t) return '';
-    if (t.aiSessionId) {
-      const sess = [...(s.copilotSessions || []), ...(s.claudeCodeSessions || [])]
-        .find((x: any) => x.id === t.aiSessionId);
-      if (sess?.cwd && sess.status !== 'idle') return sess.cwd;
-    }
-    return t.cwd ?? '';
+    // Helper is exposed on window from src/renderer/App.tsx so e2e specs
+    // can exercise the real implementation without a CJS require() (which
+    // is unavailable in a sandboxed browser context).
+    return w.__getEffectiveCwd(t, s.copilotSessions, s.claudeCodeSessions);
   }, { termId });
 }
 
 test('active AI session CWD preferred over shell CWD', async () => {
   const { window, close } = await launchTmax();
   try {
-    await window.waitForFunction(() => !!(window as any).__terminalStore, null, { timeout: 15_000 });
+    await window.waitForFunction(() => !!(window as any).__terminalStore && !!(window as any).__getEffectiveCwd, null, { timeout: 15_000 });
 
     await injectTerminal(window, { termId: TERMINAL_ID, sessId: SESSION_ID, cwd: SHELL_CWD });
     await window.evaluate(({ session }: any) => {
@@ -100,7 +90,7 @@ test('active AI session CWD preferred over shell CWD', async () => {
 test('idle AI session CWD NOT used — falls back to shell CWD', async () => {
   const { window, close } = await launchTmax();
   try {
-    await window.waitForFunction(() => !!(window as any).__terminalStore, null, { timeout: 15_000 });
+    await window.waitForFunction(() => !!(window as any).__terminalStore && !!(window as any).__getEffectiveCwd, null, { timeout: 15_000 });
 
     await injectTerminal(window, { termId: TERMINAL_ID, sessId: SESSION_ID, cwd: SHELL_CWD });
     await window.evaluate(({ session }: any) => {
@@ -120,7 +110,7 @@ test('idle AI session CWD NOT used — falls back to shell CWD', async () => {
 test('no AI session — uses shell CWD', async () => {
   const { window, close } = await launchTmax();
   try {
-    await window.waitForFunction(() => !!(window as any).__terminalStore, null, { timeout: 15_000 });
+    await window.waitForFunction(() => !!(window as any).__terminalStore && !!(window as any).__getEffectiveCwd, null, { timeout: 15_000 });
 
     await injectTerminal(window, { termId: 'plain-terminal', cwd: SHELL_CWD });
 
@@ -134,7 +124,7 @@ test('no AI session — uses shell CWD', async () => {
 test('stale aiSessionId (session removed) — falls back to shell CWD', async () => {
   const { window, close } = await launchTmax();
   try {
-    await window.waitForFunction(() => !!(window as any).__terminalStore, null, { timeout: 15_000 });
+    await window.waitForFunction(() => !!(window as any).__terminalStore && !!(window as any).__getEffectiveCwd, null, { timeout: 15_000 });
 
     // Terminal linked to a session that doesn't exist in the arrays
     await injectTerminal(window, { termId: TERMINAL_ID, sessId: 'nonexistent-session', cwd: SHELL_CWD });
