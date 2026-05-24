@@ -2,8 +2,15 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTerminalStore } from '../state/terminal-store';
 import { formatKeyForPlatform } from '../utils/platform';
 import { tokenizeAnd, matchesAllTokens } from '../../shared/and-filter';
+import { getTerminalEntry } from '../terminal-registry';
 import InputDialog from './InputDialog';
 import { confirmDialog } from './AppDialog';
+
+// Mouse-mode reset sequence: turns off every DEC mouse-tracking protocol
+// (?1000 / ?1002 / ?1003 / ?1006 / ?1015). Used by the "Reset Mouse Mode"
+// command palette action to unstick panes whose TUI (Ink-based Copilot CLI,
+// Claude Code, etc.) enabled mouse tracking and never reset it (GH #117).
+const MOUSE_RESET_SEQUENCE = '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l';
 
 interface Command {
   id: string;
@@ -154,6 +161,31 @@ const CommandPalette: React.FC = () => {
       }},
       { id: 'openDiagLog', label: 'Open Diagnostics Log', action: () => {
         window.terminalAPI.getDiagLogPath().then((p: string) => (window.terminalAPI as any).openPath(p));
+      }},
+      { id: 'resetMouseMode', label: 'Reset Mouse Mode (recover scroll / selection)', action: () => {
+        // Manual escape hatch for the bug where a TUI (e.g. Copilot CLI,
+        // Claude Code, fzf inline mode) enables xterm mouse tracking and
+        // never resets it - leaving wheel-scroll, drag-select, and click
+        // selection broken on that pane until restart (GH #117). Writes
+        // the reset sequences directly to the focused pane's xterm so
+        // the user doesn't have to drop to a shell and printf manually.
+        const id = focusedId();
+        if (!id) {
+          store().addToast('No focused terminal');
+          return;
+        }
+        const entry = getTerminalEntry(id);
+        if (!entry) {
+          store().addToast('Could not access focused terminal');
+          return;
+        }
+        try {
+          entry.terminal.write(MOUSE_RESET_SEQUENCE);
+          window.terminalAPI.diagLog?.('renderer:mouse-mode-reset-manual', { terminalId: id });
+          store().addToast('Mouse mode reset - scroll and selection should work now');
+        } catch (err) {
+          store().addToast('Failed to reset mouse mode');
+        }
       }},
       { id: 'reportIssue', label: 'Report Issue', action: () => {
         const version = document.querySelector('.status-dim')?.textContent?.replace('v', '') || 'unknown';
