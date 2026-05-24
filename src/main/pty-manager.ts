@@ -149,7 +149,21 @@ export class PtyManager {
 
     const baseEnv = sanitizeEnv(opts.env ?? (process.env as Record<string, string>));
     const shellName = opts.shellPath.toLowerCase();
-    const shellEnv: Record<string, string> = { TERM_PROGRAM: 'tmax', COLORTERM: 'truecolor' };
+    // Advertise TERM_PROGRAM=vscode (instead of our own "tmax") so AI CLIs
+    // that detect VS Code switch to their non-Ink renderer. Ink-based TUIs
+    // (Copilot CLI, Claude Code) paint their whole UI in-place via CUU +
+    // erase + redraw, so the conversation is overwritten on every render
+    // and nothing scrolls off the top into xterm's scrollback. The vscode
+    // render path emits real "static" lines, preserving scrollback. We
+    // expose TMAX_VERSION for shell prompts and tools that legitimately
+    // want to know they're in tmax. VS Code is a safer impersonation than
+    // Microsoft.Terminal: VS Code's own terminal is also xterm.js, so
+    // capability assumptions match.
+    const shellEnv: Record<string, string> = {
+      TERM_PROGRAM: 'vscode',
+      TMAX_VERSION: '1',
+      COLORTERM: 'truecolor',
+    };
 
     // Set PROMPT_COMMAND via env var for native bash (not WSL — shell init takes longer)
     // zsh doesn't support PROMPT_COMMAND; it uses precmd hooks injected below via PTY write
