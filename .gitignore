@@ -16,6 +16,9 @@ dist/
 CLAUDE.local.md
 AGENTS.local.md
 
+# Local editor settings
+.vscode/
+
 # Build/swap helpers
 _swap.cmd
 _swap_now.cmd
