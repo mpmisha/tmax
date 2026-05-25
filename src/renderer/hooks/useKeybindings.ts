@@ -206,9 +206,21 @@ function dispatchAction(action: string): void {
     case 'createTerminal':
       store.createTerminal();
       break;
-    case 'closeTerminal':
-      if (focusedId) store.closeTerminal(focusedId);
+    case 'closeTerminal': {
+      // Mirror TabContextMenu's "Close" behavior (TabContextMenu.tsx ~L443):
+      // when panes are multi-selected, the shortcut closes every selected
+      // pane (union with the focused pane in case it's not in the set).
+      // Without this, Ctrl+Shift+W silently dropped all but the focused
+      // pane from a multi-pane close (TASK-172).
+      const sel = Object.keys(store.selectedTerminalIds);
+      const ids = sel.length > 0
+        ? Array.from(new Set([...sel, ...(focusedId ? [focusedId] : [])]))
+        : (focusedId ? [focusedId] : []);
+      if (ids.length === 0) break;
+      if (sel.length > 0) store.clearSelection();
+      (async () => { for (const id of ids) await store.closeTerminal(id); })();
       break;
+    }
     case 'restoreClosedTerminal':
       store.restoreClosedTerminal();
       break;
