@@ -408,6 +408,7 @@ const StatusBar: React.FC = () => {
     { text: 'Click the prompt text on the banner to jump to it in the scrollback.', ai: true },
     { text: 'Click the colored dot on the banner for a story-style session summary.', ai: true },
     { text: 'Right-click an AI session in the sidebar → 📖 View summary.', ai: true },
+    { text: 'Hover the pane title or its tab for a quick session summary (opener, branch, activity).', ai: true },
     { text: 'Pin AI sessions to the top with the 📌 button or right-click menu.', ai: true },
     { text: 'Ctrl+Shift+K opens the prompts history for the focused pane.' },
     { text: 'Ctrl+Shift+Y searches every pane\'s prompts and jumps to the match.' },
