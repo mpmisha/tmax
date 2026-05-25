@@ -4330,27 +4330,31 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         let nextLatched = current.aiPromptTitleLatched;
         if (override) {
           title = override;
+        } else if (current.aiPromptTitleLatched) {
+          // Once we've stamped a session-derived title, leave it alone -
+          // Copilot's `summary` field gets rewritten to the latest user
+          // message on every turn, so latching only the latestPrompt path
+          // is not enough. Pane title represents the session's opening
+          // ask; later turns shouldn't keep rewriting it. The latch
+          // resets on explicit user rename or on a fresh relink.
+          title = current.title;
         } else {
           // Strip XML/HTML tags from summary (e.g. slash command markup)
           const clean = (session.summary || '').replace(/<[^>]+>/g, '').trim();
           const summary = clean.length > 60 ? clean.slice(0, 57) + '...' : clean;
-          // Fresh sessions can have an empty `summary` while the CLI
-          // generates one (Copilot) or never (some Claude session shapes).
-          // Use the latest prompt as a fallback, but LATCH it after the
-          // first set so later prompts don't keep rewriting the title -
-          // the pane title should reflect the session's opening ask, not
-          // its latest turn. A real curated summary still takes over and
-          // clears the latch when it eventually populates.
+          // First session-derived title for this pane: prefer summary,
+          // fall back to latestPrompt for sessions whose CLI hasn't yet
+          // populated summary. Latch immediately so the next update can't
+          // overwrite.
           if (summary) {
             title = summary;
-            nextLatched = false;
-          } else if (session.latestPrompt && !current.aiPromptTitleLatched) {
+          } else if (session.latestPrompt) {
             const promptClean = session.latestPrompt.replace(/<[^>]+>/g, '').trim();
             title = promptClean.length > 60 ? promptClean.slice(0, 57) + '...' : promptClean || current.title;
-            if (title && title !== current.title) nextLatched = true;
           } else {
             title = current.title;
           }
+          if (title && title !== current.title) nextLatched = true;
         }
         if (current.title !== title || nextLatched !== current.aiPromptTitleLatched) {
           newTerminals.set(id, { ...newTerminals.get(id)!, title, aiPromptTitleLatched: nextLatched });
