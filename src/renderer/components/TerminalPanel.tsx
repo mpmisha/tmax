@@ -2675,6 +2675,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   const aiProvider = useTerminalStore((s): 'copilot' | 'claude-code' | undefined =>
     getSessionProvider(s.copilotSessions, s.claudeCodeSessions, aiSessionId),
   );
+  // Native browser tooltip on the pane title: surface the AI session's
+  // own summary (row.summary for Copilot, firstPrompt-derived for Claude)
+  // so the user can read the full session topic even though the title
+  // itself is latched on the opening ask. Suppress when summary equals
+  // the visible title to avoid a duplicate hint.
+  const aiSessionSummary = useTerminalStore((s) => {
+    if (!aiSessionId) return null;
+    const session = findSessionById(s.copilotSessions, s.claudeCodeSessions, aiSessionId);
+    const raw = session?.summary?.trim();
+    return raw && raw !== title ? raw : null;
+  });
   // Force a re-render every 30s so the relative time stays fresh even when
   // nothing else in the session changes.
   const [, tickForClock] = useReducer((n: number) => n + 1, 0);
@@ -2996,6 +3007,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
           ) : (
             <span
               className="terminal-pane-title-text"
+              title={aiSessionSummary || undefined}
               onDoubleClick={(e) => {
                 // In float mode the parent has its own dblclick handler
                 // (maximize-toggle); we don't want both rename AND maximize
