@@ -87,9 +87,19 @@ export function smartUnwrapForCopy(text: string, enabled: boolean = true): strin
     if (isContinuation && out.length > 0) {
       const prev = out[out.length - 1];
       const prevTrimmed = prev.trim();
+      // Only merge into a previous line that starts at column 0. Wrap
+      // continuations only happen against an unindented paragraph - if
+      // BOTH lines are indented, they're parallel content (e.g. Claude/
+      // Copilot rendering a chat message with a 2-space container indent
+      // around every line of a code block). The earlier check ran solely
+      // on the prev line's content/whitespace state, so a 10-line code
+      // block all sharing the same "  " prefix collapsed into one giant
+      // line on copy (TASK-174 follow-up).
+      const prevIsUnindented = /^\S/.test(prev);
       // Don't merge into empty/blank previous, bullets-only, or code fences.
       if (
         prevTrimmed !== '' &&
+        prevIsUnindented &&
         !CODE_FENCE_RE.test(prev)
       ) {
         out[out.length - 1] = trimRowEnd(prev.trimEnd() + ' ' + cur.trimStart());
