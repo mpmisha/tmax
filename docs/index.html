@@ -482,6 +482,16 @@
       color: var(--yellow);
       margin-top: 16px;
       display: none;
+      line-height: 1.55;
+      text-align: left;
+    }
+    .mac-note strong {
+      color: var(--fg);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .mac-note p {
+      margin: 6px 0;
     }
     .mac-note code {
       background: rgba(0,0,0,0.3);
@@ -844,7 +854,11 @@
     <br><small id="os-detail"></small>
   </a>
   <div class="mac-note" id="mac-note">
-    macOS: If you see "tmax is damaged", run: <code>xattr -cr /Applications/tmax.app</code>
+    <strong>macOS says "tmax is damaged and can't be opened"?</strong>
+    <p>Click <strong>Cancel</strong>, not Move to Trash. tmax is not Apple Developer-signed, so macOS may block the first launch.</p>
+    <p>Run this in Terminal, then open tmax again:</p>
+    <code>xattr -cr /Applications/tmax.app</code>
+    <p>If you installed it somewhere else, adjust the path, for example <code>~/Applications/tmax.app</code>.</p>
   </div>
   <div class="download-other">
     <p>Other platforms:</p>
