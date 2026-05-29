@@ -1272,6 +1272,44 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     // scrolls from other handlers in this file that don't re-trigger events).
     const scrollPollTimer = setInterval(updateScrolledAway, 750);
 
+    // TASK-180: make dragging the scrollbar actually scroll the buffer.
+    // Wheel is intercepted directly via scrollLines() (see the custom wheel
+    // handler below), but scrollbar drag relies on xterm's internal
+    // Viewport scroll->buffer sync, which proved unreliable here - wheel
+    // scrolls while the scrollbar thumb is dead. We map the dragged
+    // scrollTop back to a buffer line and move xterm's ydisp to match.
+    //
+    // Gated on an active scrollbar interaction so streaming/programmatic
+    // scrollTop changes (which xterm sets to ydisp * cellHeight) never yank
+    // the view. After any buffer scroll targetLine === viewportY anyway, so
+    // even a stray call is a no-op - the guard is belt-and-suspenders.
+    let scrollbarInteracting = false;
+    const onViewportMouseDown = (e: MouseEvent) => {
+      const vp = viewportScrollEl;
+      // The native scrollbar sits to the right of the content box, so a
+      // mousedown past clientWidth (which excludes the scrollbar) is a
+      // scrollbar/track interaction rather than a click on terminal text.
+      if (vp && e.offsetX >= vp.clientWidth) scrollbarInteracting = true;
+    };
+    const onWindowMouseUp = () => { scrollbarInteracting = false; };
+    const syncBufferToScrollbar = () => {
+      if (!scrollbarInteracting) return;
+      try {
+        const vp = viewportScrollEl;
+        if (!vp) return;
+        const cellHeight =
+          (term as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } } })
+            ._core?._renderService?.dimensions?.css?.cell?.height || 0;
+        if (cellHeight <= 0) return;
+        const buf = term.buffer.active;
+        const targetLine = Math.max(0, Math.min(buf.baseY, Math.round(vp.scrollTop / cellHeight)));
+        if (targetLine !== buf.viewportY) term.scrollToLine(targetLine);
+      } catch { /* term disposed or viewport not ready */ }
+    };
+    viewportScrollEl?.addEventListener('mousedown', onViewportMouseDown);
+    window.addEventListener('mouseup', onWindowMouseUp);
+    viewportScrollEl?.addEventListener('scroll', syncBufferToScrollbar, { passive: true });
+
     // Hide xterm's helper textarea from UI Automation as strongly as we can
     // without breaking keyboard input. Windows Voice Access and other UIA-based
     // dictation tools discover the textarea, treat it as a real text field,
@@ -2363,6 +2401,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       dataDisposable.dispose();
       scrollDisposable.dispose();
       viewportScrollEl?.removeEventListener('scroll', updateScrolledAway);
+      viewportScrollEl?.removeEventListener('scroll', syncBufferToScrollbar);
+      viewportScrollEl?.removeEventListener('mousedown', onViewportMouseDown);
+      window.removeEventListener('mouseup', onWindowMouseUp);
       clearInterval(scrollPollTimer);
       unsubscribePtyData();
       unsubscribePtyExit();
