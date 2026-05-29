@@ -78,39 +78,65 @@ const FALLBACK_FONTS = [
   'Cascadia Code', 'Cascadia Mono', 'Consolas', 'Courier New', 'Lucida Console',
 ];
 
+// Session cache for the filtered monospace list. Font enumeration +
+// canvas measurement is expensive (hundreds of fonts on Windows), so we
+// compute it at most once per app session and reuse it on every later
+// Settings open.
+let cachedMonoFonts: string[] | null = null;
+let monoFontsPromise: Promise<string[]> | null = null;
+
+// Detect monospace fonts via canvas measurement (an 'i' and a 'W' render
+// at the same width). The measureText loop is chunked with yields so it
+// never blocks the renderer main thread - otherwise the whole window
+// freezes while Settings > Appearance mounts (TASK-181).
+async function computeMonoFonts(): Promise<string[]> {
+  let allFonts: string[];
+  try {
+    allFonts = await (window.terminalAPI as any).getSystemFonts();
+  } catch {
+    allFonts = [];
+  }
+  if (!allFonts || allFonts.length === 0) return FALLBACK_FONTS;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return FALLBACK_FONTS;
+
+  const mono: string[] = [];
+  const BATCH = 40;
+  for (let i = 0; i < allFonts.length; i++) {
+    const font = allFonts[i];
+    ctx.font = `16px "${font}"`;
+    const wi = ctx.measureText('iiiiii').width;
+    const wW = ctx.measureText('WWWWWW').width;
+    if (Math.abs(wi - wW) < 0.5) {
+      mono.push(font);
+    }
+    // Yield to the event loop between batches so the UI stays responsive.
+    if (i % BATCH === BATCH - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  return mono.length > 0 ? mono : FALLBACK_FONTS;
+}
+
 function useAvailableFonts(): string[] {
-  const [available, setAvailable] = useState<string[]>([]);
+  const [available, setAvailable] = useState<string[]>(() => cachedMonoFonts ?? []);
   useEffect(() => {
-    (async () => {
-      // Get all system fonts from the main process
-      let allFonts: string[];
-      try {
-        allFonts = await (window.terminalAPI as any).getSystemFonts();
-      } catch {
-        allFonts = [];
-      }
-      if (!allFonts || allFonts.length === 0) {
-        setAvailable(FALLBACK_FONTS);
-        return;
-      }
-
-      // Filter to monospace fonts using canvas measurement:
-      // A monospace font renders 'i' and 'W' at the same width.
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { setAvailable(FALLBACK_FONTS); return; }
-
-      const mono: string[] = [];
-      for (const font of allFonts) {
-        ctx.font = `16px "${font}"`;
-        const wi = ctx.measureText('iiiiii').width;
-        const wW = ctx.measureText('WWWWWW').width;
-        if (Math.abs(wi - wW) < 0.5) {
-          mono.push(font);
-        }
-      }
-      setAvailable(mono.length > 0 ? mono : FALLBACK_FONTS);
-    })();
+    // Already computed this session — nothing to do.
+    if (cachedMonoFonts) return;
+    let cancelled = false;
+    // Share a single in-flight computation across mounts.
+    if (!monoFontsPromise) {
+      monoFontsPromise = computeMonoFonts().then((fonts) => {
+        cachedMonoFonts = fonts;
+        return fonts;
+      });
+    }
+    monoFontsPromise.then((fonts) => {
+      if (!cancelled) setAvailable(fonts);
+    });
+    return () => { cancelled = true; };
   }, []);
   return available;
 }
