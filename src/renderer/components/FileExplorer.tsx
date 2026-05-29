@@ -196,6 +196,19 @@ const FileExplorer: React.FC = () => {
     }
   }, [wslDistro]);
 
+  // Re-read the previewed file from disk and refresh the pane in place.
+  // Mirrors the reload affordance in MarkdownPreviewOverlay so .md files
+  // opened from the file tree get the same button.
+  const handlePreviewReload = useCallback(() => {
+    if (!preview) return;
+    const { path: reloadPath } = preview;
+    (window.terminalAPI as any).fileRead(reloadPath, wslDistro).then((content: string | null) => {
+      if (typeof content !== 'string') return;
+      // Don't clobber if the user closed or switched files mid-reload.
+      setPreview((cur) => (cur && cur.path === reloadPath ? { ...cur, content } : cur));
+    }).catch(() => { /* swallow read errors, matching handleFileClick */ });
+  }, [preview, wslDistro]);
+
   const handleFileClick = useCallback((filePath: string, fileName: string) => {
     // Try to preview any file — fileRead returns null for binary/large files
     (window.terminalAPI as any).fileRead(filePath, wslDistro).then((content: string | null) => {
@@ -408,6 +421,7 @@ const FileExplorer: React.FC = () => {
             filePath={preview.path}
             onClose={() => setPreview(null)}
             onOpenExternally={openFileExternally}
+            onReload={handlePreviewReload}
             side={previewSide}
             onToggleSide={() => setPreviewSide((s) => s === 'right' ? 'left' : 'right')}
             width={`${previewWidth}%`}
