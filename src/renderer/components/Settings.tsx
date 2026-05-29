@@ -728,7 +728,7 @@ const AppearanceSettings: React.FC = () => {
             <option value="workspaces">Workspaces</option>
           </select>
         </SettingRow>
-        <SettingRow label="Hide tab close buttons" description="Hide the ✕ button on tabs to avoid accidentally closing them">
+        <SettingRow label="Hide tab close buttons" description="Hide the ✕ button on tabs and workspaces to avoid accidentally closing them">
           <label className="toggle-switch">
             <input type="checkbox" checked={(config as any).hideTabCloseButtons === true}
               onChange={() => useTerminalStore.getState().toggleHideTabCloseButtons()} />

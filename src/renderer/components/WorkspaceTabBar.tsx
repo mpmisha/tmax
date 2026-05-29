@@ -144,6 +144,9 @@ const WorkspaceTabBar: React.FC<{ vertical?: boolean; side?: 'left' | 'right' }>
   const config = useTerminalStore((s) => s.config);
   const tabBarPosition = useTerminalStore((s) => s.tabBarPosition);
   const setTabBarPosition = useTerminalStore((s) => (s as any).setTabBarPosition);
+  // Shared with flat tabs: the "Hide tab close buttons" setting hides the
+  // ✕ on workspace tabs too, so there's a single toggle for both.
+  const hideCloseButtons = useTerminalStore((s) => s.hideTabCloseButtons);
   // TASK-79: discoverable affordance for the multi-select / Show-Selected
   // filter introduced in TASK-72. We render a toolbar button only when
   // there is a multi-selection (>= 2 panes). No selection -> no button ->
@@ -267,7 +270,7 @@ const WorkspaceTabBar: React.FC<{ vertical?: boolean; side?: 'left' | 'right' }>
               isRenaming={renamingId === id}
               renameValue={renameValue}
               renameInputRef={renameInputRef}
-              showCloseBtn={workspaces.size > 1}
+              showCloseBtn={workspaces.size > 1 && !hideCloseButtons}
               onActivate={() => setActiveWorkspace(id)}
               onMiddleClick={() => handleClose(id)}
               onDoubleClick={() => {
