@@ -461,6 +461,7 @@ const FileExplorer: React.FC = () => {
               <span className="file-preview-name">{preview.name}</span>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
                 <ZoomControls zoomPercent={previewZoom} onZoomIn={previewZoomIn} onZoomOut={previewZoomOut} onZoomReset={previewZoomReset} />
+                <button className="file-preview-btn" onClick={handlePreviewReload} title="Reload from disk" aria-label="Reload from disk">&#x21BB;</button>
                 <button className="file-preview-btn" onClick={() => openFileExternally(preview.path)} title="Open externally">&#8599;</button>
                 <button className="file-preview-btn" onClick={() => setPreviewSide((s) => s === 'right' ? 'left' : 'right')} title="Move to other side">{previewSide === 'right' ? '\u25C0' : '\u25B6'}</button>
                 <button className="file-preview-btn close" onClick={() => setPreview(null)} title="Close (Esc)">&#10005;</button>
