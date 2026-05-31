@@ -4,7 +4,7 @@
 
 <h1 align="center">tmax</h1>
 
-<p align="center">A powerful cross-platform multi-terminal app with tiling layouts, floating panels, and a keyboard-driven workflow.</p>
+<p align="center"><strong>Get the max out of your terminal.</strong><br />A powerful cross-platform multi-terminal app with tiling layouts, floating panels, and a keyboard-driven workflow.</p>
 
 Built with Electron, React, TypeScript, xterm.js, and node-pty.
 
