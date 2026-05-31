@@ -6,6 +6,9 @@
   <title>tmax - Multi-Terminal App for AI Coding</title>
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/InbarR/tmax/main/assets/icon.png">
   <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/InbarR/tmax/main/assets/icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #0a0a0a;
@@ -93,7 +96,7 @@
       .logo-wrap::before { animation: none; opacity: 0; }
       .logo-wrap svg.tmax-logo .ch { animation: none; }
     }
-    .hero h1 { font-size: 52px; font-weight: 700; margin-bottom: 4px; letter-spacing: -1px; line-height: 1.1; }
+    .hero h1 { font-family: 'JetBrains Mono', var(--mono); font-size: 56px; font-weight: 800; margin-bottom: 6px; letter-spacing: -2px; line-height: 1.1; }
     .hero .tagline { font-size: 24px; color: var(--blue); font-weight: 600; margin-bottom: 12px; letter-spacing: -0.5px; }
     .hero p { font-size: 18px; color: var(--fg2); max-width: 620px; margin: 0 auto 20px; line-height: 1.5; }
     .hero .badges { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 30px; }
@@ -831,32 +834,6 @@
 </div>
 <script async defer src="https://buttons.github.io/buttons.js"></script>
 
-<div class="screenshot">
-  <img src="screenshots/tmax-hero.png" alt="tmax screenshot">
-</div>
-
-<div class="use-cases" id="uses">
-  <h2><span class="sec-marker"><span class="sm-prompt">&gt;</span><span class="sm-cmd">tmax uses</span></span>When to reach for tmax</h2>
-  <p class="sub">If any of these sound like your week, you'll feel at home.</p>
-  <div class="use-case-grid">
-    <div class="use-case">
-      <div class="icon">&#129302;</div>
-      <h3>Running multiple AI sessions in parallel</h3>
-      <p>Spin up Claude Code in one pane, Copilot in another, a build log in a third. Track which ones are thinking, waiting for approval, or completed from the side panel.</p>
-    </div>
-    <div class="use-case">
-      <div class="icon">&#9000;</div>
-      <h3>Keyboard-first navigation</h3>
-      <p><code>Ctrl+Shift+P</code> opens a VS Code-style command palette to jump anywhere: switch terminals, split a pane, toggle a panel. <code>Shift+Arrow</code> moves focus between panes. Every shortcut is rebindable in settings.</p>
-    </div>
-    <div class="use-case">
-      <div class="icon">&#128301;</div>
-      <h3>Name sessions, watch in grid, focus when needed</h3>
-      <p>Rename any tab or AI session so you know at a glance what each one is doing. Flip to grid view to watch several agents progress in parallel, then zoom into one with focus mode (<code>Ctrl+Shift+F</code>) when it's time to pay attention.</p>
-    </div>
-  </div>
-</div>
-
 <div class="download-section" id="download">
   <h2><span class="sec-marker"><span class="sm-prompt">&gt;</span><span class="sm-cmd">tmax install</span></span>Download</h2>
   <p class="detected-os" id="detected-os">Detecting your platform...</p>
@@ -886,6 +863,32 @@
     </button>
     <div class="npm-after">Then run <code>tmax</code> from any terminal.</div>
   </div>
+</div>
+
+<div class="use-cases" id="uses">
+  <h2><span class="sec-marker"><span class="sm-prompt">&gt;</span><span class="sm-cmd">tmax uses</span></span>When to reach for tmax</h2>
+  <p class="sub">If any of these sound like your week, you'll feel at home.</p>
+  <div class="use-case-grid">
+    <div class="use-case">
+      <div class="icon">&#129302;</div>
+      <h3>Running multiple AI sessions in parallel</h3>
+      <p>Spin up Claude Code in one pane, Copilot in another, a build log in a third. Track which ones are thinking, waiting for approval, or completed from the side panel.</p>
+    </div>
+    <div class="use-case">
+      <div class="icon">&#9000;</div>
+      <h3>Keyboard-first navigation</h3>
+      <p><code>Ctrl+Shift+P</code> opens a VS Code-style command palette to jump anywhere: switch terminals, split a pane, toggle a panel. <code>Shift+Arrow</code> moves focus between panes. Every shortcut is rebindable in settings.</p>
+    </div>
+    <div class="use-case">
+      <div class="icon">&#128301;</div>
+      <h3>Name sessions, watch in grid, focus when needed</h3>
+      <p>Rename any tab or AI session so you know at a glance what each one is doing. Flip to grid view to watch several agents progress in parallel, then zoom into one with focus mode (<code>Ctrl+Shift+F</code>) when it's time to pay attention.</p>
+    </div>
+  </div>
+</div>
+
+<div class="screenshot">
+  <img src="screenshots/tmax-hero.png" alt="tmax screenshot">
 </div>
 
 <div class="changelog" id="changelog">
