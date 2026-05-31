@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
 import { useTerminalStore } from '../state/terminal-store';
 import { tokenizeAnd, matchesAllTokens } from '../../shared/and-filter';
 import type { CopilotSessionSummary } from '../../shared/copilot-types';
@@ -16,6 +16,9 @@ interface SearchEntry {
    *  is missing (otherwise SessionSummary would render null). */
   sessionCwd: string;
   ageMs: number;
+  /** Lowercased `prompt\npaneTitle\nsessionFolder`, precomputed once so
+   *  per-keystroke filtering doesn't rebuild + lowercase it every time. */
+  haystack: string;
 }
 
 function shortPath(p: string): string {
@@ -104,6 +107,7 @@ const PromptSearchDialog: React.FC = () => {
             }
           }
           const baseTime = sess.lastActivityTime || sess.latestPromptTime || Date.now();
+          const sessionFolder = shortPath(sess.cwd || '');
           const sessionEntries: SearchEntry[] = list
             .map((p, i) => ({
               sessionId: sess.id,
@@ -112,9 +116,10 @@ const PromptSearchDialog: React.FC = () => {
               prompt: p,
               terminalId,
               paneTitle,
-              sessionFolder: shortPath(sess.cwd || ''),
+              sessionFolder,
               sessionCwd: sess.cwd || '',
               ageMs: Math.max(0, Date.now() - baseTime) + (list.length - i - 1) * 1000,
+              haystack: `${p}\n${paneTitle}\n${sessionFolder}`.toLowerCase(),
             }))
             .filter((e) => !isTrivial(e.prompt));
           if (sessionEntries.length === 0) return;
@@ -134,7 +139,13 @@ const PromptSearchDialog: React.FC = () => {
   // Tokenize the query on whole-word case-insensitive 'AND' for client-side
   // filtering of non-SQLite results (Claude Code, fresh installs, fallback).
   // SQLite FTS5 handles AND/OR natively when the user is on the DB path.
-  const tokens = useMemo(() => tokenizeAnd(query), [query]);
+  //
+  // Drive filtering + highlighting off a *deferred* copy of the query so the
+  // input itself stays responsive while typing - the expensive entry filter
+  // and the (up to 200) highlighted rows re-render at lower priority instead
+  // of blocking each keystroke.
+  const deferredQuery = useDeferredValue(query);
+  const tokens = useMemo(() => tokenizeAnd(deferredQuery), [deferredQuery]);
   const matchesAll = useCallback(
     (haystack: string) => matchesAllTokens(haystack, tokens),
     [tokens],
@@ -179,6 +190,7 @@ const PromptSearchDialog: React.FC = () => {
             }
           }
           const ts = row.timestamp ? new Date(row.timestamp).getTime() : 0;
+          const sessionFolder = shortPath(row.cwd || '');
           results.push({
             sessionId: row.session_id,
             provider: 'copilot',
@@ -186,9 +198,10 @@ const PromptSearchDialog: React.FC = () => {
             prompt,
             terminalId,
             paneTitle,
-            sessionFolder: shortPath(row.cwd || ''),
+            sessionFolder,
             sessionCwd: row.cwd || '',
             ageMs: Math.max(0, Date.now() - ts),
+            haystack: `${prompt}\n${paneTitle}\n${sessionFolder}`.toLowerCase(),
           });
         }
         results.sort((a, b) => a.ageMs - b.ageMs);
@@ -208,11 +221,11 @@ const PromptSearchDialog: React.FC = () => {
     if (sqliteResults !== null) {
       const claudeEntries = entries
         .filter((e) => e.provider === 'claude-code')
-        .filter((e) => matchesAll(`${e.prompt}\n${e.paneTitle}\n${e.sessionFolder}`.toLowerCase()));
+        .filter((e) => matchesAll(e.haystack));
       return [...sqliteResults, ...claudeEntries].sort((a, b) => a.ageMs - b.ageMs);
     }
     if (tokens.length === 0) return entries;
-    return entries.filter((e) => matchesAll(`${e.prompt}\n${e.paneTitle}\n${e.sessionFolder}`.toLowerCase()));
+    return entries.filter((e) => matchesAll(e.haystack));
   }, [entries, sqliteResults, tokens, matchesAll]);
 
   const filtered = useMemo(() => allMatches.slice(0, 200), [allMatches]);
