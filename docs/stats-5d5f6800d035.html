@@ -146,6 +146,10 @@ function renderChart(releases) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.parentElement.getBoundingClientRect();
+  // The container can measure 0x0 before layout settles or while the page is
+  // in a background tab. Drawing then yields a blank chart; bail and let the
+  // ResizeObserver re-render once the container has real dimensions.
+  if (rect.width < 2 || rect.height < 2) return;
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   ctx.scale(dpr, dpr);
@@ -326,6 +330,10 @@ function renderTimeline() {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.parentElement.getBoundingClientRect();
+  // Same 0x0 guard as renderChart: avoid drawing the timeline into a
+  // zero-size canvas (background tab / pre-layout), which leaves it blank
+  // even though the data and note are fine.
+  if (rect.width < 2 || rect.height < 2) return;
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   ctx.scale(dpr, dpr);
@@ -751,6 +759,25 @@ document.getElementById('timelineStack-platform').addEventListener('click', () =
 });
 
 loadTimeline();
+
+// Re-render charts when their container gains or changes size - e.g. when a
+// background tab (which reports 0x0 rects) finally lays out, or on window
+// resize. Without this, a first paint into a 0x0 canvas leaves the chart
+// blank until the user clicks a toggle.
+(function observeChartResize() {
+  const rerender = () => {
+    if (typeof allData !== 'undefined' && Array.isArray(allData)) {
+      try { renderChart(allData); } catch (_) {}
+    }
+    try { renderTimeline(); } catch (_) {}
+  };
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(rerender);
+    document.querySelectorAll('.chart-container').forEach((c) => ro.observe(c));
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) rerender(); });
+  window.addEventListener('resize', rerender);
+})();
 
 // GoatCounter public counter endpoint. Requires "public /counter endpoint"
 // to be enabled in Settings - Site on goatcounter.com, otherwise the fetch
