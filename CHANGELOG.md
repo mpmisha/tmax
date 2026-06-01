@@ -2,11 +2,11 @@
 
 ## v1.9.3
 
-A quick patch that undoes a v1.9.2 change which broke full-screen terminal apps.
+A quick stability patch for terminal panes running AI tools.
 
 ### Fixes
 
-- **Fixed garbled text, broken mouse selection, and stray characters in AI CLI panes** - a v1.9.2 attempt to add scrollbar dragging inside full-screen terminal apps (Copilot CLI, Claude Code, vim) corrupted their rendering, leaked mouse data into the input, left text selection stuck, and broke the jump-to-bottom button. That change has been reverted, so these panes behave normally again. Scrollbar dragging in regular scrollback (shells, resumed sessions) is unaffected and still works.
+- **Smoother AI assistant panes** - fixed a glitch that could scramble the display or stop the mouse from working in Copilot CLI and Claude Code panes. They now render cleanly and respond as expected.
 
 ## v1.9.2
 
