@@ -4,7 +4,6 @@ import { useTerminalStore } from '../state/terminal-store';
 import { getTerminalEntry } from '../terminal-registry';
 import { runJumpToPromptSearch } from '../utils/jump-to-prompt';
 import { renderWithMdLinks } from '../utils/md-link-parser';
-import SessionTimeline from './SessionTimeline';
 import { tokenizeAnd, matchesAllTokens } from '../../shared/and-filter';
 import type { CopilotSessionSummary, CopilotSessionStatus, SessionProvider, SessionLifecycle } from '../../shared/copilot-types';
 import { detectSessionHost, stripClawpilotContext } from '../../shared/copilot-types';
@@ -271,7 +270,6 @@ const CopilotPanel: React.FC = () => {
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [lifecycleTab, setLifecycleTab] = useState<LifecycleTab>('active');
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; session: CopilotSessionSummary } | null>(null);
-  const [timelineSession, setTimelineSession] = useState<CopilotSessionSummary | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; provider: SessionProvider; value: string } | null>(null);
   const [promptsDialog, setPromptsDialog] = useState<{ title: string; prompts: string[]; terminalId: string | null } | null>(null);
   const [showRunningOnly, setShowRunningOnly] = useState(false);
@@ -1466,8 +1464,15 @@ const CopilotPanel: React.FC = () => {
           <button className="context-menu-item" onClick={() => handleShowPrompts(ctxMenu.session)}>
             💬 Show prompts
           </button>
-          <button className="context-menu-item" onClick={() => { setTimelineSession(ctxMenu.session); setCtxMenu(null); }}>
-            🕑 Timeline
+          <button className="context-menu-item" onClick={() => {
+            useTerminalStore.setState({ transcriptSession: {
+              sessionId: ctxMenu.session.id,
+              provider: ctxMenu.session.provider === 'claude-code' ? 'claude-code' : 'copilot',
+              title: summaryOverrides[ctxMenu.session.id] || ctxMenu.session.summary || getTitle(ctxMenu.session),
+            } });
+            setCtxMenu(null);
+          }}>
+            🕑 Transcript
           </button>
           <button className="context-menu-item" onClick={() => handleStartRename(ctxMenu.session)}>
             ✏️ Rename
@@ -1535,14 +1540,6 @@ const CopilotPanel: React.FC = () => {
             🗑️ Remove from list
           </button>
         </div>
-      )}
-      {timelineSession && (
-        <SessionTimeline
-          provider={timelineSession.provider === 'claude-code' ? 'claude-code' : 'copilot'}
-          sessionId={timelineSession.id}
-          title={summaryOverrides[timelineSession.id] || timelineSession.summary || getTitle(timelineSession)}
-          onClose={() => setTimelineSession(null)}
-        />
       )}
     </div>
   );

@@ -3044,6 +3044,33 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
               }}
             >{title}</span>
           )}
+          {aiSessionId && (
+            <button
+              className="terminal-pane-float-btn"
+              title="Session transcript"
+              aria-label="Session transcript"
+              onClick={(e) => {
+                e.stopPropagation();
+                const s = useTerminalStore.getState();
+                const sess = findSessionById(s.copilotSessions, s.claudeCodeSessions, aiSessionId);
+                if (s.transcriptSession?.sessionId === aiSessionId) {
+                  useTerminalStore.setState({ transcriptSession: null });
+                  return;
+                }
+                useTerminalStore.setState({
+                  transcriptSession: {
+                    sessionId: aiSessionId,
+                    provider: sess?.provider === 'claude-code' ? 'claude-code' : 'copilot',
+                    title: sess?.summary || title || aiSessionId.slice(0, 8),
+                  },
+                });
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 3.5h12v8H6l-3 2.5v-2.5H2z" />
+              </svg>
+            </button>
+          )}
           {(() => {
             // TASK-139: Float / Restore button next to the ⋯ menu. Tooltip
             // surfaces the toggleFloat shortcut so users learn the keyboard

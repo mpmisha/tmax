@@ -418,6 +418,59 @@ export function extractClaudeCodePromptsWithTime(
   }
 }
 
+/** Join ALL text blocks of a message (assistant replies span several). */
+function extractAllText(content: unknown): string {
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      if (block.type === 'text' && block.text) parts.push(String(block.text));
+    }
+    return parts.join('\n').trim();
+  }
+  return '';
+}
+
+/**
+ * Full two-sided transcript (user + assistant) with timestamps, for the chat
+ * timeline panel. Claude Code stores assistant reply text in its .jsonl, so we
+ * can show both sides (unlike Copilot, which only persists the user side).
+ */
+export function extractClaudeCodeTranscript(
+  filePath: string,
+  limit = 1000,
+): { role: 'user' | 'assistant'; text: string; time: number }[] {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const out: { role: 'user' | 'assistant'; text: string; time: number }[] = [];
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const o = JSON.parse(line);
+        const time = o.timestamp ? new Date(o.timestamp).getTime() : 0;
+        if (o.type === 'user' && o.message?.content) {
+          const text = extractText(o.message.content);
+          if (!text || text.startsWith('[Request interrupted')) continue;
+          const stripped = stripCommandXml(text).trim();
+          if (!stripped) continue; // tool_result / meta-only user turn
+          const nameMatch = text.match(/<command-name>([^<]+)<\/command-name>/);
+          const display = nameMatch
+            ? `/${nameMatch[1].replace(/^\/+/, '')}${stripped ? ` — ${stripped}` : ''}`
+            : stripped;
+          out.push({ role: 'user', text: display, time });
+        } else if (o.type === 'assistant' && o.message?.content) {
+          const text = extractAllText(o.message.content);
+          if (!text) continue; // tool_use-only / thinking-only turn
+          out.push({ role: 'assistant', text, time });
+        }
+      } catch { /* skip */ }
+    }
+    return out.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
 export function clearClaudeCodeCache(filePath: string): void {
   cache.delete(filePath);
   promptsCache.delete(filePath);

@@ -1145,14 +1145,16 @@ function registerIpcHandlers(): void {
     return wslSessionManager?.getClaudeCodePrompts(id) ?? [];
   });
 
-  // Read-only session timeline: each user prompt of a session paired with its
-  // timestamp, for either provider. Sourced from the session files (events
-  // carry per-message timestamps), so it only covers AI sessions.
+  // Read-only chat transcript for a session, with a timestamp per message.
+  // Claude Code persists assistant replies (two-sided chat); Copilot only
+  // persists the user side, so its transcript is user-only. Sourced from the
+  // session files, so it covers AI sessions only.
   ipcMain.handle(IPC.AI_GET_SESSION_TIMELINE, (_event, provider: string, id: string) => {
     if (provider === 'claude-code') {
-      return claudeCodeMonitor?.getPromptsWithTime(id) ?? [];
+      return claudeCodeMonitor?.getTranscript(id) ?? [];
     }
-    return copilotMonitor?.getPromptsWithTime(id) ?? [];
+    return (copilotMonitor?.getPromptsWithTime(id) ?? [])
+      .map((p) => ({ role: 'user' as const, text: p.text, time: p.time }));
   });
 
   // ── Version check IPC handlers ──────────────────────────────────────

@@ -31,6 +31,7 @@ import FloatingRenameInput from './components/FloatingRenameInput';
 import Toast from './components/Toast';
 import SessionSummary from './components/SessionSummary';
 import MarkdownPreviewOverlay from './components/MarkdownPreviewOverlay';
+import TranscriptPanel from './components/TranscriptPanel';
 import AppDialogHost from './components/AppDialog';
 
 const App: React.FC = () => {
@@ -336,6 +337,7 @@ const App: React.FC = () => {
         <FloatingRenameInput />
         <SessionSummary />
         <MarkdownPreviewOverlay />
+        <TranscriptPanel />
         <Toast />
         <AppDialogHost />
       </div>

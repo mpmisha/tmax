@@ -954,6 +954,8 @@ interface TerminalStore {
   // previews now (kind: 'image') - the same overlay component branches on
   // kind to render <img> vs sanitized markdown.
   markdownPreview: { filePath: string; content: string; fileName: string; kind?: 'md' | 'image' } | null;
+  // Open AI-session chat transcript side panel (TASK-146). null = closed.
+  transcriptSession: { sessionId: string; provider: 'copilot' | 'claude-code'; title: string } | null;
   // Diff review state
   diffReviewOpen: boolean;
   diffReviewTerminalId: TerminalId | null;
@@ -1303,6 +1305,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   selectedCopilotSessionId: null,
   tabGroups: new Map(),
   markdownPreview: null,
+  transcriptSession: null,
   diffReviewOpen: false,
   diffReviewTerminalId: null,
   diffReviewMode: 'unstaged' as DiffMode,
