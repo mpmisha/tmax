@@ -156,7 +156,18 @@ const TranscriptPanel: React.FC = () => {
           <div className="transcript-group" key={g.day}>
             <div className="transcript-day">{g.day}</div>
             {g.items.map((m, i) => (
-              <div className={`transcript-msg ${m.role}`} key={i}>
+              <div
+                className={`transcript-msg ${m.role}`}
+                key={i}
+                onContextMenu={(e) => {
+                  // Right-click copies your current selection, or the whole
+                  // message if nothing is selected.
+                  e.preventDefault();
+                  const sel = window.getSelection?.()?.toString();
+                  copyText(sel && sel.trim() ? sel : m.text);
+                  useTerminalStore.getState().addToast('Copied to clipboard');
+                }}
+              >
                 {m.role === 'assistant'
                   ? <div className="transcript-bubble md" dangerouslySetInnerHTML={{ __html: renderMd(m.text) }} />
                   : <div className="transcript-bubble">{m.text}</div>}

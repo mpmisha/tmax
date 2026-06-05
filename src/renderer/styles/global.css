@@ -3106,8 +3106,8 @@ body.broadcast-on .terminal-panel {
   padding: 12px 12px 20px;
   /* Let users select + copy transcript text (the app sets user-select:none
      on chrome elsewhere). */
-  -webkit-user-select: text;
-  user-select: text;
+  -webkit-user-select: text !important;
+  user-select: text !important;
   cursor: text;
 }
 .transcript-empty { padding: 28px 12px; text-align: center; color: var(--text-secondary); font-size: 13px; }
@@ -3144,7 +3144,7 @@ body.broadcast-on .terminal-panel {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom-left-radius: 4px;
 }
-.transcript-bubble { -webkit-user-select: text; user-select: text; }
+.transcript-bubble, .transcript-bubble * { -webkit-user-select: text !important; user-select: text !important; }
 .transcript-metarow { display: flex; align-items: center; gap: 6px; margin-top: 3px; padding: 0 5px; }
 .transcript-msg.user .transcript-metarow { flex-direction: row-reverse; }
 .transcript-time { font-size: 10px; color: var(--text-secondary); }
