@@ -1,8 +1,28 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { useTerminalStore } from '../state/terminal-store';
 import { findSessionById } from '../state/terminal-store';
 
 interface Msg { role: 'user' | 'assistant'; text: string; time: number }
+
+// Render assistant messages as Markdown (sanitized). User prompts stay plain
+// text so simple input isn't over-formatted.
+function renderMd(text: string): string {
+  const html = marked(text, { breaks: true, gfm: true }) as string;
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'img'],
+    FORBID_ATTR: ['style', 'srcset'],
+  });
+}
+
+function copyText(text: string): void {
+  try {
+    (window.terminalAPI as any).clipboardWrite?.(text);
+  } catch { /* ignore */ }
+  try { navigator.clipboard?.writeText(text); } catch { /* ignore */ }
+}
 
 function fmtDay(ts: number): string {
   if (!ts) return 'Unknown date';
@@ -108,7 +128,7 @@ const TranscriptPanel: React.FC = () => {
   const isCopilot = provider === 'copilot';
 
   return (
-    <div className="transcript-panel">
+    <div className={`transcript-panel${isCopilot ? ' copilot' : ''}`}>
       <div className="transcript-header">
         <div className="transcript-titles">
           <span className="transcript-title">{title || 'Transcript'}</span>
@@ -137,8 +157,14 @@ const TranscriptPanel: React.FC = () => {
             <div className="transcript-day">{g.day}</div>
             {g.items.map((m, i) => (
               <div className={`transcript-msg ${m.role}`} key={i}>
-                <div className="transcript-bubble">{m.text}</div>
-                <div className="transcript-time">{fmtTime(m.time)}</div>
+                {m.role === 'assistant'
+                  ? <div className="transcript-bubble md" dangerouslySetInnerHTML={{ __html: renderMd(m.text) }} />
+                  : <div className="transcript-bubble">{m.text}</div>}
+                <div className="transcript-metarow">
+                  <span className="transcript-time">{fmtTime(m.time)}</span>
+                  <button className="transcript-copy" title="Copy message" aria-label="Copy message"
+                    onClick={() => copyText(m.text)}>&#10697;</button>
+                </div>
               </div>
             ))}
           </div>
