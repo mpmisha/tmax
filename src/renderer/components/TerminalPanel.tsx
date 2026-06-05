@@ -339,7 +339,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   const textareaDiagCleanupRef = useRef<(() => void) | null>(null);
   // Tracks signals that mean "an app is drawing its own cursor"; either one
   // being on is enough to keep xterm's cursor hidden. See syncCursorVisibility.
-  const cursorHideSignalsRef = useRef({ bracketedPaste: false, altScreen: false });
+  const cursorHideSignalsRef = useRef({ bracketedPaste: false, altScreen: false, appCursorShown: true });
   // TASK-52: read latest config in the copy handlers without rebuilding
   // the terminal. Updated by a small effect below.
   const smartUnwrapRef = useRef<boolean>(true);
@@ -1788,7 +1788,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
       // active post-data.
       if (cursorSyncDirty) {
         cursorSyncDirty = false;
-        const shouldHide = cursorHideSignalsRef.current.bracketedPaste || cursorHideSignalsRef.current.altScreen;
+        const sig = cursorHideSignalsRef.current;
+        // GH #128: only force-hide when the app itself hasn't shown the cursor.
+        // Copilot CLI relies on the terminal cursor (sends ?25h); respecting
+        // that keeps its input cursor visible instead of blanking it.
+        const shouldHide = (sig.bracketedPaste || sig.altScreen) && !sig.appCursorShown;
         term.write(shouldHide ? '\x1b[?25l' : '\x1b[?25h');
       }
       flushMouseModeReset();
@@ -1847,14 +1851,15 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         ) {
           mouseTrackingOn = false;
         }
-        // If the app tries to flip the hardware cursor while either of our
-        // hide signals is on, queue a re-hide for after this chunk lands.
-        // Claude Code / Copilot CLI emit ?25h when drawing their input field
-        // and used to slip past us, painting xterm's cursor next to theirs.
-        else if (chunk.startsWith('\x1b[?25h', i) || chunk.startsWith('\x1b[?25l', i)) {
-          if (cursorHideSignalsRef.current.bracketedPaste || cursorHideSignalsRef.current.altScreen) {
-            cursorSyncDirty = true;
-          }
+        // GH #128: track the app's own cursor request and respect it. Copilot
+        // CLI shows the terminal cursor in its input field via ?25h; the old
+        // behavior force-re-hid it, leaving Copilot with no cursor at all.
+        // We now only force-hide when the app itself has hidden it (?25l).
+        else if (chunk.startsWith('\x1b[?25h', i)) {
+          cursorHideSignalsRef.current.appCursorShown = true; cursorSyncDirty = true;
+        }
+        else if (chunk.startsWith('\x1b[?25l', i)) {
+          cursorHideSignalsRef.current.appCursorShown = false; cursorSyncDirty = true;
         }
       }
     };
