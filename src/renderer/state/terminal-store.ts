@@ -1115,6 +1115,19 @@ interface TerminalStore {
    */
   movePaneToWorkspace: (terminalId: TerminalId, destWorkspaceId: WorkspaceId) => void;
   toggleCopilotPanel: () => void;
+  // Open/close the read-only transcript panel. By default it follows the
+  // focused AI pane; toggling always returns to that follow-focus mode.
+  toggleTranscript: () => void;
+  // Pin the transcript to a specific session id, regardless of which pane is
+  // focused (used by the AI Sessions list right-click → Transcript, where the
+  // session may have no live/linked pane). Cleared back to follow-focus when
+  // the user focuses another pane or toggles the panel.
+  transcriptSessionId: string | null;
+  openTranscriptForSession: (sessionId: string) => void;
+  // Docked transcript panel width in px (drag-resizable, persisted to
+  // localStorage). Clamped to [TRANSCRIPT_WIDTH_MIN, TRANSCRIPT_WIDTH_MAX].
+  transcriptWidth: number;
+  setTranscriptWidth: (width: number) => void;
   // Open the AI Sessions panel and ask it to highlight the session
   // linked to this pane. Sets focus to the pane (so the panel reads the
   // right aiSessionId) and bumps aiSessionHighlightRequest. If the
@@ -1257,6 +1270,21 @@ function makeDefaultWorkspace(): Workspace {
   };
 }
 
+// Transcript panel width is a renderer-only view preference, so it lives in
+// localStorage rather than the multi-window session/config snapshot. Clamp on
+// read so a hand-edited or stale value can't dock the panel off-screen.
+export const TRANSCRIPT_WIDTH_MIN = 320;
+export const TRANSCRIPT_WIDTH_MAX = 900;
+const TRANSCRIPT_WIDTH_KEY = 'tmax.transcriptWidth';
+export function readTranscriptWidth(): number {
+  try {
+    const raw = window.localStorage?.getItem(TRANSCRIPT_WIDTH_KEY);
+    const n = raw ? parseInt(raw, 10) : NaN;
+    if (Number.isFinite(n)) return Math.max(TRANSCRIPT_WIDTH_MIN, Math.min(TRANSCRIPT_WIDTH_MAX, n));
+  } catch { /* localStorage unavailable - fall through to default */ }
+  return 400;
+}
+
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   // ── Initial state ────────────────────────────────────────────────
   terminals: new Map(),
@@ -1307,6 +1335,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   tabGroups: new Map(),
   markdownPreview: null,
   transcriptOpen: false,
+  transcriptSessionId: null,
+  transcriptWidth: readTranscriptWidth(),
   diffReviewOpen: false,
   diffReviewTerminalId: null,
   diffReviewMode: 'unstaged' as DiffMode,
@@ -4030,6 +4060,21 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     set((s) => ({ showCopilotPanel: !s.showCopilotPanel }));
   },
 
+  toggleTranscript: () => {
+    // Toggling always returns to follow-focus mode (clears any pinned session).
+    set((s) => ({ transcriptOpen: !s.transcriptOpen, transcriptSessionId: null }));
+  },
+
+  openTranscriptForSession: (sessionId: string) => {
+    set({ transcriptOpen: true, transcriptSessionId: sessionId });
+  },
+
+  setTranscriptWidth: (width: number) => {
+    const clamped = Math.max(TRANSCRIPT_WIDTH_MIN, Math.min(TRANSCRIPT_WIDTH_MAX, Math.round(width)));
+    set({ transcriptWidth: clamped });
+    try { window.localStorage?.setItem(TRANSCRIPT_WIDTH_KEY, String(clamped)); } catch { /* ignore */ }
+  },
+
   loadCopilotSessions: async () => {
     const limit = get().copilotSessionsLimit;
     const result = await (window.terminalAPI as any).listCopilotSessions(limit);
@@ -4222,6 +4267,26 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         candidateId = focusedTerminalId && pool.includes(focusedTerminalId)
           ? focusedTerminalId
           : pool[0];
+      } else {
+        // TASK-152: the session's cwd matched no eligible pane. This is the
+        // #1 reason `cop --resume` / `--continue` sessions never get the AI
+        // bar. Log what we compared against so the gap is diagnosable - which
+        // gate (cwd mismatch vs mode vs existing-link) rejected each pane.
+        try {
+          (window as any).terminalAPI?.diagLog?.('renderer:ai-link-no-eligible', {
+            sessionId: session.id,
+            sessionCwd,
+            focusedTerminalId,
+            panes: [...terminals.entries()].map(([id, t]) => ({
+              id,
+              cwd: t.cwd,
+              normCwd: normCwd(t.cwd ?? ''),
+              cwdMatch: normCwd(t.cwd ?? '') === sessionCwd,
+              mode: t.mode,
+              aiSessionId: t.aiSessionId,
+            })),
+          });
+        } catch { /* ignore */ }
       }
     }
 

@@ -43,17 +43,38 @@ const POLL_MS = 2000;
 
 /**
  * Right-docked, read-only chat transcript for the *focused* AI pane. Follows
- * focus: click a different pane and it switches to that session. Claude Code
- * shows both sides; Copilot only persists user messages (banner notes it).
+ * focus: click a different pane and it switches to that session. Both sides
+ * are shown for Claude Code and Copilot (a Copilot turn that only ran tools
+ * with no written reply simply has nothing to display - no banner, since
+ * that gap is rare and an always-on note just reads as noise).
  * Live-refreshes while open. Opened from the AI pane's title-bar button.
+ *
+ * Width is drag-resizable via the handle on the panel's left edge (persisted
+ * to localStorage). The search bar (🔍 / Ctrl+F while focused) finds messages
+ * and jumps the body to each hit.
  */
 const TranscriptPanel: React.FC = () => {
   const open = useTerminalStore((s) => s.transcriptOpen);
   const focusedId = useTerminalStore((s) => s.focusedTerminalId);
-  // Re-derive when sessions load (provider/title) or focus changes.
-  const aiSessionId = useTerminalStore((s) => (focusedId ? s.terminals.get(focusedId)?.aiSessionId : undefined));
+  // A pinned session (from the AI Sessions list) wins over follow-focus.
+  const pinnedSessionId = useTerminalStore((s) => s.transcriptSessionId);
+  const focusedAiSessionId = useTerminalStore((s) => (focusedId ? s.terminals.get(focusedId)?.aiSessionId : undefined));
+  const aiSessionId = pinnedSessionId ?? focusedAiSessionId;
   const copilotSessions = useTerminalStore((s) => s.copilotSessions);
   const claudeCodeSessions = useTerminalStore((s) => s.claudeCodeSessions);
+  const width = useTerminalStore((s) => s.transcriptWidth);
+
+  // Clear the pin when the user deliberately focuses a different pane, so the
+  // panel resumes following focus. Skip the initial mount (prev === current).
+  const prevFocusedRef = useRef(focusedId);
+  useEffect(() => {
+    if (prevFocusedRef.current !== focusedId) {
+      prevFocusedRef.current = focusedId;
+      if (useTerminalStore.getState().transcriptSessionId) {
+        useTerminalStore.setState({ transcriptSessionId: null });
+      }
+    }
+  }, [focusedId]);
 
   const sess = useMemo(
     () => (aiSessionId ? findSessionById(copilotSessions, claudeCodeSessions, aiSessionId) : null),
@@ -63,9 +84,18 @@ const TranscriptPanel: React.FC = () => {
   const title = sess?.summary || (aiSessionId ? aiSessionId.slice(0, 8) : '');
 
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const sigRef = useRef<string>('');
   const close = useCallback(() => useTerminalStore.setState({ transcriptOpen: false }), []);
+
+  // ── Search state ──────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [matchIdx, setMatchIdx] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  // DOM node per *global* message index, so we can scroll a hit into view.
+  const msgRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const atBottom = () => {
     const el = bodyRef.current;
@@ -92,6 +122,18 @@ const TranscriptPanel: React.FC = () => {
           const next = Array.isArray(rows) ? rows : [];
           const nextSig = sig(next);
           if (!initial && nextSig === sigRef.current) return;
+          // Don't clobber an in-progress text selection. A live re-render
+          // collapses any selection the user is dragging inside the panel,
+          // which on an active (streaming) session feels like "can't select
+          // to copy". Skip this round; sigRef is left stale so the next poll
+          // re-applies once the selection is released.
+          if (!initial) {
+            const seln = window.getSelection?.();
+            if (seln && !seln.isCollapsed && seln.anchorNode &&
+                panelRef.current?.contains(seln.anchorNode)) {
+              return;
+            }
+          }
           const wasAtBottom = initial || atBottom();
           sigRef.current = nextSig;
           setMsgs(next);
@@ -105,30 +147,126 @@ const TranscriptPanel: React.FC = () => {
     return () => { cancelled = true; clearInterval(timer); };
   }, [open, aiSessionId, provider]);
 
+  // Escape: close the search bar first if it's open, otherwise close the panel.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (searchOpen) { setSearchOpen(false); setQuery(''); }
+        else close();
+        return;
+      }
+      // Ctrl/Cmd+F opens the transcript search. The panel is read-only so the
+      // terminal keeps DOM focus - we can't gate on focus being inside the
+      // panel (it never is). Instead this listener only exists while the
+      // transcript is open (see effect guard), and we only act when there's a
+      // session to search, so it doesn't hijack the terminal's Ctrl+F at other
+      // times. Closing the transcript hands Ctrl+F straight back to the pane.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && aiSessionId) {
+        e.preventDefault();
+        e.stopPropagation();
+        setSearchOpen(true);
+        searchInputRef.current?.focus();
+      }
+    };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [open, close]);
+  }, [open, close, searchOpen, aiSessionId]);
+
+  // Reset transient state when the focused session changes.
+  useEffect(() => { setSearchOpen(false); setQuery(''); }, [aiSessionId]);
+  useEffect(() => { if (searchOpen) searchInputRef.current?.focus(); }, [searchOpen]);
 
   const groups = useMemo(() => {
-    const out: { day: string; items: Msg[] }[] = [];
+    const out: { day: string; items: { m: Msg; gi: number }[] }[] = [];
+    let gi = 0;
     for (const m of msgs ?? []) {
       const day = fmtDay(m.time);
       let g = out[out.length - 1];
       if (!g || g.day !== day) { g = { day, items: [] }; out.push(g); }
-      g.items.push(m);
+      g.items.push({ m, gi });
+      gi++;
     }
     return out;
   }, [msgs]);
 
+  // Global indices of messages whose text contains the query (case-insensitive).
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !msgs) return [] as number[];
+    const res: number[] = [];
+    msgs.forEach((m, i) => { if (m.text.toLowerCase().includes(q)) res.push(i); });
+    return res;
+  }, [query, msgs]);
+  const matchSet = useMemo(() => new Set(matches), [matches]);
+
+  // Keep the current match in range; reset to the first hit on a new query.
+  useEffect(() => { setMatchIdx(0); }, [query]);
+  const safeMatchIdx = matches.length ? Math.min(matchIdx, matches.length - 1) : 0;
+
+  // Jump the body to the active match. Depends on the match position + query so
+  // it fires on navigation, not on every 2s poll (same-length result is a no-op).
+  useEffect(() => {
+    if (!matches.length) return;
+    const target = matches[safeMatchIdx];
+    const el = msgRefs.current.get(target);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [safeMatchIdx, query, matches.length]);
+
+  const gotoMatch = useCallback((delta: number) => {
+    setMatchIdx((cur) => {
+      if (!matches.length) return 0;
+      return (cur + delta + matches.length) % matches.length;
+    });
+  }, [matches.length]);
+
+  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); }
+  };
+
+  // ── Resize: drag the left-edge handle to set the docked width ──────
+  const onResizeDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = useTerminalStore.getState().transcriptWidth;
+    document.body.style.cursor = 'col-resize';
+    const onMove = (ev: MouseEvent) => {
+      // Panel is docked on the right, so dragging left (negative delta) widens it.
+      useTerminalStore.getState().setTranscriptWidth(startWidth + (startX - ev.clientX));
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
   if (!open) return null;
 
   const isCopilot = provider === 'copilot';
+  const activeMatchGi = matches.length ? matches[safeMatchIdx] : -1;
 
   return (
-    <div className={`transcript-panel${isCopilot ? ' copilot' : ''}`}>
+    <div
+      ref={panelRef}
+      className={`transcript-panel${isCopilot ? ' copilot' : ''}`}
+      style={{ width }}
+      // Focusable so a click inside makes the panel the activeElement. Without
+      // this, clicking a (non-focusable) bubble sends focus to <body>, and the
+      // focused terminal's blur handler reads that as "nobody took focus" and
+      // refocuses xterm - which collapses the text selection you're dragging.
+      tabIndex={-1}
+    >
+      <div
+        className="transcript-resizer"
+        onMouseDown={onResizeDown}
+        title="Drag to resize"
+        role="separator"
+        aria-orientation="vertical"
+      />
       <div className="transcript-header">
         <div className="transcript-titles">
           <span className="transcript-title">{title || 'Transcript'}</span>
@@ -137,11 +275,31 @@ const TranscriptPanel: React.FC = () => {
             {aiSessionId && msgs ? ` · ${msgs.length} message${msgs.length === 1 ? '' : 's'}` : ''}
           </span>
         </div>
+        {aiSessionId && (
+          <button
+            className={`transcript-search-toggle${searchOpen ? ' active' : ''}`}
+            onClick={() => setSearchOpen((v) => !v)}
+            title="Search transcript (Ctrl+F)"
+            aria-label="Search transcript"
+          >&#128269;</button>
+        )}
         <button className="transcript-close" onClick={close} title="Close (Esc)" aria-label="Close">&#10005;</button>
       </div>
-      {aiSessionId && isCopilot && (
-        <div className="transcript-disclaimer">
-          Copilot CLI only saves your messages, so assistant replies aren't shown here.
+      {aiSessionId && searchOpen && (
+        <div className="transcript-search">
+          <input
+            ref={searchInputRef}
+            className="transcript-search-input"
+            value={query}
+            placeholder="Find in transcript…"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onSearchKey}
+          />
+          <span className="transcript-search-count">
+            {query.trim() ? (matches.length ? `${safeMatchIdx + 1}/${matches.length}` : '0/0') : ''}
+          </span>
+          <button className="transcript-search-nav" onClick={() => gotoMatch(-1)} disabled={!matches.length} title="Previous match (Shift+Enter)" aria-label="Previous match">&#8593;</button>
+          <button className="transcript-search-nav" onClick={() => gotoMatch(1)} disabled={!matches.length} title="Next match (Enter)" aria-label="Next match">&#8595;</button>
         </div>
       )}
       <div className="transcript-body" ref={bodyRef}>
@@ -152,32 +310,40 @@ const TranscriptPanel: React.FC = () => {
         {aiSessionId && msgs !== null && msgs.length === 0 && (
           <div className="transcript-empty">No messages found for this session.</div>
         )}
+        {query.trim() && msgs && matches.length === 0 && (
+          <div className="transcript-empty">No messages match “{query.trim()}”.</div>
+        )}
         {groups.map((g) => (
           <div className="transcript-group" key={g.day}>
             <div className="transcript-day">{g.day}</div>
-            {g.items.map((m, i) => (
-              <div
-                className={`transcript-msg ${m.role}`}
-                key={i}
-                onContextMenu={(e) => {
-                  // Right-click copies your current selection, or the whole
-                  // message if nothing is selected.
-                  e.preventDefault();
-                  const sel = window.getSelection?.()?.toString();
-                  copyText(sel && sel.trim() ? sel : m.text);
-                  useTerminalStore.getState().addToast('Copied to clipboard');
-                }}
-              >
-                {m.role === 'assistant'
-                  ? <div className="transcript-bubble md" dangerouslySetInnerHTML={{ __html: renderMd(m.text) }} />
-                  : <div className="transcript-bubble">{m.text}</div>}
-                <div className="transcript-metarow">
-                  <span className="transcript-time">{fmtTime(m.time)}</span>
-                  <button className="transcript-copy" title="Copy message" aria-label="Copy message"
-                    onClick={() => copyText(m.text)}>&#10697;</button>
+            {g.items.map(({ m, gi }) => {
+              const isHit = matchSet.has(gi);
+              const isActive = gi === activeMatchGi;
+              return (
+                <div
+                  className={`transcript-msg ${m.role}${isHit ? ' search-hit' : ''}${isActive ? ' search-active' : ''}`}
+                  key={gi}
+                  ref={(el) => { if (el) msgRefs.current.set(gi, el); else msgRefs.current.delete(gi); }}
+                  onContextMenu={(e) => {
+                    // Right-click copies your current selection, or the whole
+                    // message if nothing is selected.
+                    e.preventDefault();
+                    const sel = window.getSelection?.()?.toString();
+                    copyText(sel && sel.trim() ? sel : m.text);
+                    useTerminalStore.getState().addToast('Copied to clipboard');
+                  }}
+                >
+                  {m.role === 'assistant'
+                    ? <div className="transcript-bubble md" dangerouslySetInnerHTML={{ __html: renderMd(m.text) }} />
+                    : <div className="transcript-bubble">{m.text}</div>}
+                  <div className="transcript-metarow">
+                    <span className="transcript-time">{fmtTime(m.time)}</span>
+                    <button className="transcript-copy" title="Copy message" aria-label="Copy message"
+                      onClick={() => copyText(m.text)}>&#10697;</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ))}
       </div>

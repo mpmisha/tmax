@@ -281,6 +281,39 @@ export function extractCopilotPromptsWithTime(
   }
 }
 
+/**
+ * Full two-sided transcript for the session-timeline view: user prompts AND
+ * assistant replies. Copilot persists assistant text in `assistant.message`
+ * events (a `content` field); turns that were purely tool calls have empty
+ * content and are skipped, so the timeline shows the conversational text only.
+ */
+export function extractCopilotTranscript(
+  eventsFilePath: string,
+  limit = 1000,
+): { role: 'user' | 'assistant'; text: string; time: number }[] {
+  try {
+    const content = fs.readFileSync(eventsFilePath, 'utf-8');
+    const out: { role: 'user' | 'assistant'; text: string; time: number }[] = [];
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const o = JSON.parse(line);
+        const time = o.timestamp ? new Date(o.timestamp).getTime() : 0;
+        if (o.type === 'user.message') {
+          const text = String(o.data?.content || o.data?.transformedContent || '').trim();
+          if (text) out.push({ role: 'user', text: text.slice(0, 4000), time });
+        } else if (o.type === 'assistant.message') {
+          const text = String(o.data?.content || '').trim();
+          if (text) out.push({ role: 'assistant', text: text.slice(0, 8000), time });
+        }
+      } catch { /* skip */ }
+    }
+    return out.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
 export function clearParserCache(eventsFilePath: string): void {
   cache.delete(eventsFilePath);
 }

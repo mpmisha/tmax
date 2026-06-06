@@ -317,8 +317,19 @@ function pickInitialWindowPlacement(saved: SavedWindowState | null): {
       savedDisplay = null;
     }
     if (savedDisplay && savedDisplay.id === cursorDisplay.id) {
+      // Clamp the saved rect into the display's work area. Without this a
+      // window saved with its top/left off-screen - dragged partly above the
+      // screen, or getNormalBounds() reporting a negative offset after a
+      // snap/maximize - restores every launch with its title bar and the top
+      // of the web content sliced off by the screen edge. Shrink to fit, then
+      // pull fully on-screen so nothing is clipped.
+      const wa = savedDisplay.workArea;
+      const width = Math.min(saved.width, wa.width);
+      const height = Math.min(saved.height, wa.height);
+      const x = Math.min(Math.max(saved.x, wa.x), wa.x + wa.width - width);
+      const y = Math.min(Math.max(saved.y, wa.y), wa.y + wa.height - height);
       return {
-        bounds: { x: saved.x, y: saved.y, width: saved.width, height: saved.height },
+        bounds: { x, y, width, height },
         maximized: saved.maximized,
       };
     }
@@ -1146,15 +1157,14 @@ function registerIpcHandlers(): void {
   });
 
   // Read-only chat transcript for a session, with a timestamp per message.
-  // Claude Code persists assistant replies (two-sided chat); Copilot only
-  // persists the user side, so its transcript is user-only. Sourced from the
-  // session files, so it covers AI sessions only.
+  // Both providers persist a two-sided chat: Claude Code in its session JSONL,
+  // Copilot via `assistant.message` events (tool-only turns carry no text and
+  // are omitted). Sourced from the session files, so it covers AI sessions only.
   ipcMain.handle(IPC.AI_GET_SESSION_TIMELINE, (_event, provider: string, id: string) => {
     if (provider === 'claude-code') {
       return claudeCodeMonitor?.getTranscript(id) ?? [];
     }
-    return (copilotMonitor?.getPromptsWithTime(id) ?? [])
-      .map((p) => ({ role: 'user' as const, text: p.text, time: p.time }));
+    return copilotMonitor?.getTranscript(id) ?? [];
   });
 
   // ── Version check IPC handlers ──────────────────────────────────────

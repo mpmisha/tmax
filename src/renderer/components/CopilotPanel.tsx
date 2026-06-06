@@ -1465,12 +1465,11 @@ const CopilotPanel: React.FC = () => {
             💬 Show prompts
           </button>
           <button className="context-menu-item" onClick={() => {
-            // Transcript follows the focused pane - focus this session's live
-            // pane (if any) so the panel shows it, then open.
-            const st = useTerminalStore.getState();
-            const term = [...st.terminals.values()].find((t) => t.aiSessionId === ctxMenu.session.id);
-            if (term) st.setFocus?.(term.id);
-            useTerminalStore.setState({ transcriptOpen: true });
+            // Pin the transcript to THIS session, regardless of which pane is
+            // focused. Old/resumed sessions often have no linked pane, so the
+            // previous "focus the linked pane" approach fell through to showing
+            // whatever pane was focused (wrong transcript).
+            useTerminalStore.getState().openTranscriptForSession(ctxMenu.session.id);
             setCtxMenu(null);
           }}>
             🕑 Transcript

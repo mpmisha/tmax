@@ -34,6 +34,7 @@ const shortcuts = [
   { category: 'AI', items: [
     { key: 'Ctrl+Shift+K', action: 'Jump to prompt in terminal' },
     { key: 'Ctrl+Shift+C', action: 'AI Sessions panel' },
+    { key: 'Ctrl+Alt+T', action: 'Toggle session transcript' },
   ]},
   { category: 'Other', items: [
     { key: 'Ctrl+Shift+B', action: 'Hide / show tab bar' },

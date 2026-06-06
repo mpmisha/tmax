@@ -98,6 +98,7 @@ const CommandPalette: React.FC = () => {
       }},
       { id: 'jumpToPrompt', label: 'Jump to Prompt', shortcut: 'Ctrl+Shift+K', action: () => { const id = focusedId(); if (id) store().showPromptsForTerminal(id); } },
       { id: 'searchPrompts', label: 'Search Prompts Across All Panes', shortcut: 'Ctrl+Shift+Y', action: () => store().togglePromptSearch() },
+      { id: 'toggleTranscript', label: 'Toggle Session Transcript', shortcut: 'Ctrl+Alt+T', action: () => store().toggleTranscript() },
       { id: 'shortcuts', label: 'Show Keyboard Shortcuts', shortcut: 'Ctrl+Shift+?', action: () => store().toggleShortcuts() },
       { id: 'settings', label: 'Open Settings', shortcut: 'Ctrl+,', action: () => store().toggleSettings() },
       { id: 'tabsFlatMode', label: 'Tabs: Use flat mode (one tab per terminal)', action: () => {

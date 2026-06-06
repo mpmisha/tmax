@@ -2806,6 +2806,65 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
     };
   }, [terminalId, aiProcessKindForPoll]);
 
+  // Re-detect when the AI agent in an *already-linked* pane changes - e.g. the
+  // user exits Copilot and starts Claude Code in the same pane. The first-run
+  // process scan (TASK-171) bails once a pane has an aiSessionId, and after a
+  // link the process stamp is cleared, so without this poll the pane keeps
+  // pointing at the now-dead session: the transcript, last-prompt bar, ping
+  // button and status dot all show stale data. We poll the descendant list on
+  // a slow cadence; when a *different* AI kind is running than the linked
+  // session's provider, we drop the stale link and re-stamp the pane so the
+  // auto-link path attaches the new session.
+  const linkedProviderForReverify = useTerminalStore((s) => {
+    const t = s.terminals.get(terminalId);
+    if (!t?.aiSessionId) return undefined;
+    return getSessionProvider(s.copilotSessions, s.claudeCodeSessions, t.aiSessionId);
+  });
+  useEffect(() => {
+    if (!linkedProviderForReverify) return;
+    const POLL_INTERVAL_MS = 5000;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const cur = useTerminalStore.getState().terminals.get(terminalId);
+      // Pane closed or unlinked elsewhere (auto-link moved it) - stop.
+      if (!cur || !cur.aiSessionId) return;
+      let names: string[] | undefined;
+      try {
+        names = await (window.terminalAPI as any).getPtyChildProcesses?.(terminalId) as string[] | undefined;
+      } catch {
+        names = undefined;
+      }
+      if (cancelled || !names || names.length === 0) return;
+      const match = detectAiInChildren(names);
+      // No AI process running (just a shell), or the same agent is still
+      // running: leave the link untouched. We only act on a positive
+      // *different-agent* signal to avoid clearing the link during the brief
+      // gap between an agent exiting and the user starting another.
+      if (!match || match.kind === linkedProviderForReverify) return;
+      window.terminalAPI.diagLog?.('renderer:ai-agent-changed-relink', {
+        terminalId, was: linkedProviderForReverify, now: match.kind, names,
+      });
+      useTerminalStore.setState((s) => {
+        const c = s.terminals.get(terminalId);
+        if (!c) return {};
+        const next = new Map(s.terminals);
+        next.set(terminalId, {
+          ...c,
+          aiSessionId: undefined,
+          aiProcessKind: match.kind,
+          aiProcessDetectedAt: Date.now(),
+          aiAutoTitle: true,
+          aiPromptTitleLatched: false,
+        });
+        return { terminals: next };
+      });
+      cancelled = true;
+    };
+    const intervalId = setInterval(() => { void tick(); }, POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(intervalId); };
+  }, [terminalId, linkedProviderForReverify]);
+
   const handleSearch = useCallback((query: string, backward?: boolean) => {
     if (!searchAddonRef.current || !query) return;
     const opts = { decorations: { matchOverviewRuler: '#888', activeMatchColorOverviewRuler: '#fff', matchBackground: '#585b70', activeMatchBackground: '#89b4fa' } };
@@ -3469,16 +3528,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
           {aiSessionId && (
             <button
               className="terminal-pane-latest-prompt-btn"
-              title="Transcript - chat history with timestamps (follows the focused pane)"
+              title={formatKeyForPlatform("Transcript - chat history with timestamps (Ctrl+Alt+T)")}
               aria-label="Session transcript"
               onClick={(e) => {
                 e.stopPropagation();
                 const s = useTerminalStore.getState();
                 if (s.transcriptOpen) {
-                  useTerminalStore.setState({ transcriptOpen: false });
+                  useTerminalStore.setState({ transcriptOpen: false, transcriptSessionId: null });
                 } else {
                   s.setFocus?.(terminalId);
-                  useTerminalStore.setState({ transcriptOpen: true });
+                  // Clear any pinned session so the panel follows this pane.
+                  useTerminalStore.setState({ transcriptOpen: true, transcriptSessionId: null });
                 }
               }}
             >💬</button>

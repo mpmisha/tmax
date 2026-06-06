@@ -164,6 +164,22 @@ const App: React.FC = () => {
     };
     document.addEventListener('wheel', handleGlobalWheel, { passive: false });
 
+    // The shell is a fixed, full-screen, overflow:hidden layout that must never
+    // scroll. But a focus()/scrollIntoView() on a descendant (xterm's hidden
+    // textarea is the classic culprit) can still nudge #root / body / html by a
+    // few px - and with no scrollbar that offset sticks forever, slicing the
+    // top of the UI off-screen. Snap any such scroll straight back to 0.
+    const scrollTargets = [document.getElementById('root'), document.body, document.documentElement]
+      .filter((el): el is HTMLElement => !!el);
+    const resetRootScroll = () => {
+      for (const t of scrollTargets) {
+        if (t.scrollTop !== 0) t.scrollTop = 0;
+        if (t.scrollLeft !== 0) t.scrollLeft = 0;
+      }
+    };
+    resetRootScroll();
+    for (const t of scrollTargets) t.addEventListener('scroll', resetRootScroll, { passive: true });
+
     // Save session before window closes
     const handleBeforeUnload = () => {
       useTerminalStore.getState().saveSession();
@@ -220,6 +236,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
       document.removeEventListener('wheel', handleGlobalWheel);
+      for (const t of scrollTargets) t.removeEventListener('scroll', resetRootScroll);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       clearInterval(autoSaveInterval);
       clearInterval(heartbeatInterval);

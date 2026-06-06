@@ -123,6 +123,10 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   'Ctrl+Shift+Alt+ArrowRight': 'resizeRight',
   'Ctrl+Shift+M': 'tabMenu',
   'Ctrl+Shift+C': 'copilotPanel',
+  // Ctrl+Alt+T: open/close the read-only transcript panel for the focused
+  // AI pane (same panel as the pane's 💬 title-bar button). Ctrl+Shift+S
+  // was taken, so Alt instead of Shift (matches the Ctrl+Alt+R/N family).
+  'Ctrl+Alt+T': 'toggleTranscript',
   // Ctrl+Shift+T: browser-style undo close (TASK-112). Reused from the
   // worktree panel because undo-close is the more frequent action; the
   // worktree panel still opens via the command palette and the
@@ -318,6 +322,9 @@ function dispatchAction(action: string): void {
       break;
     case 'copilotPanel':
       store.toggleCopilotPanel();
+      break;
+    case 'toggleTranscript':
+      store.toggleTranscript();
       break;
     case 'worktreePanel':
       store.toggleWorktreePanel();
