@@ -3,11 +3,11 @@ id: TASK-146
 title: >-
   Session timeline: read-only transcript of AI prompts with timestamps (CC +
   Copilot)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-06-02 12:07'
-updated_date: '2026-06-02 12:10'
+updated_date: '2026-06-07 09:10'
 labels: []
 dependencies: []
 ---

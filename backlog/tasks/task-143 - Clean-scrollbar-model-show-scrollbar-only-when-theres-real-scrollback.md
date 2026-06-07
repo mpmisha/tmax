@@ -1,9 +1,10 @@
 ---
 id: TASK-143
 title: 'Clean scrollbar model: show scrollbar only when there''s real scrollback'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-01 07:42'
+updated_date: '2026-06-07 09:20'
 labels: []
 dependencies: []
 ---
@@ -21,3 +22,9 @@ The terminal currently forces the xterm scrollbar always-visible (global.css ove
 - [ ] #3 Wheel scrolling is unchanged in both cases; no xterm viewport DOM/scrollHeight manipulation
 - [ ] #4 e2e: scrollback pane has a working scrollbar; alt-screen pane has none; rendering is not corrupted
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed at user direction. The conditional scrollbar model (hide the gutter for live TUIs, show a draggable bar only when there's xterm scrollback) was not implemented - the always-on gutter remains. No code shipped.
+<!-- SECTION:FINAL_SUMMARY:END -->

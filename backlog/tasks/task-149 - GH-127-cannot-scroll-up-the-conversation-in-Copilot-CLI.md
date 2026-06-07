@@ -1,9 +1,10 @@
 ---
 id: TASK-149
 title: 'GH #127: cannot scroll up the conversation in Copilot CLI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02 13:40'
+updated_date: '2026-06-07 09:20'
 labels: []
 dependencies: []
 ---
@@ -19,3 +20,9 @@ Reporter ofek01001: 'cant scroll up a conversation'. In a live alt-screen TUI (m
 - [ ] #1 Wheel scrolls the Copilot CLI conversation, OR the limitation is clearly documented
 - [ ] #2 Any fix does not manipulate xterm's viewport (avoids the v1.9.2 corruption)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed - GH #127 closed as triage. Scroll-up in Copilot CLI was not changed by a targeted fix.
+<!-- SECTION:FINAL_SUMMARY:END -->
