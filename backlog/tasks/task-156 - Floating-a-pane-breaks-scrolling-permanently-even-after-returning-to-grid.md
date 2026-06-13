@@ -4,7 +4,7 @@ title: Floating a pane breaks scrolling permanently (even after returning to gri
 status: To Do
 assignee: []
 created_date: '2026-06-11 13:51'
-updated_date: '2026-06-13 13:39'
+updated_date: '2026-06-13 13:58'
 labels: []
 dependencies: []
 ---
@@ -25,4 +25,6 @@ Reported by a new macOS user post-1.10.0. When a session is opened as a floating
 
 <!-- SECTION:NOTES:BEGIN -->
 The TASK-158 portal change (panes no longer remount on tiling reshape) very likely fixes this - float->re-tile no longer recreates xterm. Needs verification: float a pane, return to grid, confirm wheel scroll works. NOTE: scroll-after-DETACH is a separate issue (alt-buffer/mouse-tracking, see the new detach-scroll task).
+
+Detach was removed (TASK-166, commit 0bd8113), but FLOAT remains. If float-scroll is still broken: same family - floated mouse-tracking pane drops the wheel report. A drafted fix (tmax emits the wheel report itself via coreMouseService.triggerMouseEvent with freshly-computed coords; CoreMouseButton.WHEEL=4, action UP=0/DOWN=1, x/y required) was verified to emit valid SGR reports in e2e but reverted to keep the detach-removal change focused. Revisit here if float-scroll needs fixing.
 <!-- SECTION:NOTES:END -->
