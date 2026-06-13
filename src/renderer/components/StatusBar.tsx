@@ -421,7 +421,7 @@ const StatusBar: React.FC = () => {
     { text: 'Ctrl+Shift+L cycles grid column count.' },
     { text: 'Ctrl + mouse wheel zooms the focused terminal.' },
     { text: 'Double-click a pane title to rename it.' },
-    { text: 'Hover a pane title → ⋯ menu has Float, Detach, Hide, Diff and more.' },
+    { text: 'Hover a pane title → ⋯ menu has Float, Hide, Diff and more.' },
     { text: 'Drag a pane title onto another pane to swap, or to an edge to split.' },
     { text: 'Paste a URL — tmax unwraps Outlook safelinks automatically.' },
     { text: 'Click any row of a multi-line URL to open the full link.' },

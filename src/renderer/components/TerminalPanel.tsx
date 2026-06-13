@@ -3375,10 +3375,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
               {paneMode === 'floating' ? '↩️ Restore to grid' : '🪟 Float pane'}
               <span className="context-menu-shortcut">Ctrl+Shift+U</span>
             </button>
-            <button className="context-menu-item" onClick={() => {
-              setPaneMenuPos(null);
-              useTerminalStore.getState().detachTerminal(terminalId);
-            }}>↗ Detach to window</button>
+            {/* Detach-to-window removed: detaching left panes with broken
+                scroll/selection (alt-buffer + mouse-tracking state did not
+                survive the remount). The subsystem is intact (existing
+                detached windows can still reattach); only the entry point is
+                gone. */}
             {/* TASK-78: Move to workspace submenu. Hidden when there's only
                 one workspace (every destination would be the pane's current
                 workspace, so the menu would be empty). */}

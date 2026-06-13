@@ -197,18 +197,18 @@ const TabContextMenu: React.FC<TabContextMenuProps> = ({ position, selectedAtOpe
               Split Selected ({selectedAtOpen.length} tabs)
             </button>
           )}
-          <button className="context-menu-item" onClick={() => {
-            const t = store().terminals.get(position.terminalId);
-            if (t?.mode === 'detached') {
+          {/* Detach-to-window removed (left panes with broken scroll/selection
+              after the remount). Only show Reattach for any pane that is still
+              detached, so it can come back; no way to newly detach. */}
+          {terminal?.mode === 'detached' && (
+            <button className="context-menu-item" onClick={() => {
               window.terminalAPI.closeDetached(position.terminalId);
               store().reattachTerminal(position.terminalId);
-            } else {
-              store().detachTerminal(position.terminalId);
-            }
-            onClose();
-          }}>
-            {terminal?.mode === 'detached' ? 'Reattach' : 'Detach to Window'}
-          </button>
+              onClose();
+            }}>
+              Reattach
+            </button>
+          )}
           <button className="context-menu-item" onClick={handleToggleDormant}>
             {isDormant ? 'Wake' : 'Hide (Dormant)'} <span className="shortcut">{formatKeyForPlatform('Ctrl+Shift+H')}</span>
           </button>
