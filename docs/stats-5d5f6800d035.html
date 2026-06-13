@@ -140,6 +140,7 @@ function platformIcon(p) {
 }
 
 function relativeDate(d) {
+  if (!d) return ''; // snapshot fallback has no publish dates
   const diff = (Date.now() - new Date(d).getTime()) / 1000;
   if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
@@ -171,7 +172,7 @@ function renderChart(releases) {
       const p = platformOf(a.name);
       if (p in byOS) byOS[p] += a.download_count;
     }
-    return { tag: r.tag_name, date: new Date(r.published_at), ...byOS, total: byOS.windows + byOS.macos + byOS.linux };
+    return { tag: r.tag_name, date: r.published_at ? new Date(r.published_at) : null, ...byOS, total: byOS.windows + byOS.macos + byOS.linux };
   });
 
   if (data.length === 0) return;
@@ -239,8 +240,7 @@ function renderChart(releases) {
       ctx.fillText(d.total, x + barW / 2, topY - 4);
     }
 
-    // X-axis: version + date
-    const dateStr = d.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    // X-axis: version (+ date when known; the snapshot fallback has no dates)
     ctx.font = '10px system-ui';
     ctx.textAlign = 'center';
     ctx.save();
@@ -249,13 +249,16 @@ function renderChart(releases) {
     ctx.fillStyle = '#a6adc8';
     ctx.fillText(d.tag, 0, 0);
     ctx.restore();
-    ctx.save();
-    ctx.translate(x + barW / 2, pad.top + chartH + 26);
-    ctx.rotate(-0.4);
-    ctx.fillStyle = '#585b70';
-    ctx.font = '9px system-ui';
-    ctx.fillText(dateStr, 0, 0);
-    ctx.restore();
+    if (d.date) {
+      const dateStr = d.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      ctx.save();
+      ctx.translate(x + barW / 2, pad.top + chartH + 26);
+      ctx.rotate(-0.4);
+      ctx.fillStyle = '#585b70';
+      ctx.font = '9px system-ui';
+      ctx.fillText(dateStr, 0, 0);
+      ctx.restore();
+    }
   }
 
   // Legend
@@ -820,8 +823,14 @@ async function fetchGcCounter(path) {
     if (!r.ok) return null;
     const j = await r.json();
     // GoatCounter returns counts as quoted strings, e.g. {"count":"42","count_unique":"42"}.
-    const total = Number(j.count);
-    const unique = Number(j.count_unique);
+    // Values >= 1000 are formatted with a thousands separator (a regular or thin
+    // space depending on locale), e.g. {"count":"2 278"}. Strip every non-numeric
+    // character before parsing - otherwise Number("2 278") is NaN and the tile
+    // silently shows 0 (which is exactly why Unique Visitors read 0 while the
+    // sub-1000 click counters parsed fine).
+    const num = (v) => Number(String(v ?? '').replace(/[^\d.-]/g, ''));
+    const total = num(j.count);
+    const unique = num(j.count_unique);
     return {
       total: Number.isFinite(total) ? total : 0,
       unique: Number.isFinite(unique) ? unique : 0,
@@ -848,32 +857,11 @@ const PLATFORMS = [
   const visitsEl = document.getElementById('gcVisits');
   const clicksEl = document.getElementById('gcClicks');
   const ctrEl = document.getElementById('gcCtr');
-  const [visits, clicks] = await Promise.all([
-    fetchGcCounter('TOTAL'),
-    fetchGcCounter('dl'),
-  ]);
-  if (visits == null) {
-    visitsEl.textContent = 'n/a';
-    document.getElementById('gcVisitsSub').textContent = 'Enable public /counter in GoatCounter settings';
-  } else {
-    visitsEl.textContent = visits.unique.toLocaleString();
-  }
-  if (clicks == null) {
-    clicksEl.textContent = 'n/a';
-  } else {
-    clicksEl.textContent = clicks.total.toLocaleString();
-  }
-  if (visits && visits.unique > 0 && clicks != null) {
-    const pct = (clicks.total / visits.unique) * 100;
-    ctrEl.textContent = pct.toFixed(1) + '%';
-    ctrEl.classList.toggle('green', pct >= 10);
-  } else {
-    ctrEl.textContent = 'n/a';
-  }
 
   // Per-platform breakdown: sum primary + other-link clicks across all arches
   // for each OS. Each path is a separate GoatCounter event, so we fan out
-  // requests in parallel.
+  // requests in parallel. A given click fires exactly one of primary/other, so
+  // summing them does not double count.
   const perPlatform = await Promise.all(PLATFORMS.map(async (p) => {
     const paths = [];
     for (const arch of p.archs) {
@@ -881,12 +869,43 @@ const PLATFORMS = [
       paths.push(`dl-other-${p.key}-${arch}`);
     }
     const counts = await Promise.all(paths.map(fetchGcCounter));
+    const reachable = counts.some(Boolean);
     const total = counts.reduce((s, c) => s + (c ? c.total : 0), 0);
-    return { label: p.label, total };
+    return { label: p.label, total, reachable };
   }));
+  const anyReachable = perPlatform.some((p) => p.reachable);
+
+  // Headline "Download Clicks" = sum of the per-platform breakdown, NOT the
+  // standalone `dl` aggregate counter. The `dl` event is fired by a delegated
+  // listener that was added after the per-platform events already existed, so
+  // it undercounts historically (it read 384 while the platforms summed to
+  // 414). Deriving the total from the breakdown keeps the headline and the
+  // cards below consistent by construction and uses the longer history.
+  const clicksTotal = perPlatform.reduce((s, p) => s + p.total, 0);
+
+  const visits = await fetchGcCounter('TOTAL');
+  if (visits == null) {
+    visitsEl.textContent = 'n/a';
+    document.getElementById('gcVisitsSub').textContent = 'Enable public /counter in GoatCounter settings';
+  } else {
+    visitsEl.textContent = visits.unique.toLocaleString();
+  }
+  if (!anyReachable) {
+    clicksEl.textContent = 'n/a';
+  } else {
+    clicksEl.textContent = clicksTotal.toLocaleString();
+  }
+  if (visits && visits.unique > 0 && anyReachable) {
+    const pct = (clicksTotal / visits.unique) * 100;
+    ctrEl.textContent = pct.toFixed(1) + '%';
+    ctrEl.classList.toggle('green', pct >= 10);
+  } else {
+    ctrEl.textContent = 'n/a';
+  }
+
   // Always render the section, even when all counters are 0, so it's clear
   // the breakdown is being tracked (just nobody has clicked the per-platform
-  // path yet). Old clicks before the per-platform-event fix won't be in here.
+  // path yet).
   const section = document.getElementById('gcPlatformsSection');
   const container = document.getElementById('gcPlatforms');
   section.style.display = '';
@@ -895,9 +914,51 @@ const PLATFORMS = [
     .join('');
 })();
 
+// Build a GitHub-API-shaped releases array from a committed history snapshot,
+// so the summary cards and the install chart still render when the live GitHub
+// API is unavailable. The snapshot carries no publish dates, so published_at is
+// null and the date-dependent bits (chart sub-labels, "N days ago") degrade
+// gracefully instead of showing garbage.
+function releasesFromSnapshot(snap) {
+  return Object.entries(snap.releases).map(([tag, assets]) => ({
+    tag_name: tag,
+    published_at: null,
+    assets: Object.entries(assets).map(([name, download_count]) => ({ name, download_count })),
+  }));
+}
+
+async function fetchReleases() {
+  // Primary source: the live GitHub API (fresh counts + real publish dates).
+  // It is unauthenticated, so it is capped at 60 requests/hour PER IP - which
+  // is trivially exhausted behind a shared corporate NAT, where it returns a
+  // 403 error object instead of an array. Without a guard, iterating that
+  // object threw and left every card showing "-" and the chart blank.
+  // Fall back to docs/download-history.json (refreshed every 6h by the Track
+  // Downloads workflow) so the page never goes empty.
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=30`);
+    if (resp.ok) {
+      const j = await resp.json();
+      if (Array.isArray(j) && j.length) return j;
+    }
+  } catch (_) { /* fall through to the committed snapshot */ }
+  try {
+    const resp = await fetch('download-history.json', { cache: 'no-store' });
+    const data = await resp.json();
+    const snap = data.snapshots && data.snapshots[data.snapshots.length - 1];
+    if (snap) return releasesFromSnapshot(snap);
+  } catch (_) { /* no data available at all */ }
+  return null;
+}
+
 async function load() {
-  const resp = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=30`);
-  const releases = await resp.json();
+  const releases = await fetchReleases();
+  if (!releases) {
+    document.getElementById('total').textContent = 'n/a';
+    document.getElementById('updates').textContent = 'n/a';
+    document.getElementById('releases').textContent = 'n/a';
+    return;
+  }
   allData = releases;
 
   let totalUsers = 0, totalUpdates = 0;
