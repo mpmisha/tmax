@@ -115,8 +115,15 @@ const REPO = 'InbarR/tmax';
 // Matches RELEASES, RELEASES-x64, RELEASES-arm64 - Squirrel metadata files
 // fetched on every auto-update attempt. Not real installs.
 const IS_META = (name) => name.startsWith('RELEASES');
-// Auto-update assets (not new users)
-const IS_UPDATE = (name) => /\.nupkg$/.test(name);
+// Auto-update assets (not new users):
+//  - Windows Squirrel payloads: *.nupkg
+//  - macOS Squirrel.Mac payloads: tmax-darwin-<arch>-<ver>.zip, fetched on every
+//    macOS auto-update (the analog of .nupkg). Real macOS installs arrive via .dmg,
+//    so without this every macOS update was miscounted as a new install and the
+//    "new installs by version" chart turned into a wall of green.
+// Windows portable (win32 *.zip) and Linux *.zip stay counted - those platforms
+// don't auto-update through a zip.
+const IS_UPDATE = (name) => /\.nupkg$/.test(name) || /darwin.*\.zip$/i.test(name);
 
 function platformOf(name) {
   if (/win32|\.exe$|\.nupkg$|RELEASES/i.test(name)) return 'windows';
