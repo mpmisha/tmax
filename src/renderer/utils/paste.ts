@@ -1,11 +1,21 @@
-// Normalize CRLF/CR to LF so readline-style shells (PSReadLine, bash readline,
-// Claude Code, Copilot CLI) don't submit twice on a single embedded newline.
-// When the focused shell has advertised bracketed paste (?2004h), wrap the
+// When the focused shell has advertised bracketed paste (?2004h) - AI TUIs
+// (Claude Code, Copilot CLI) and modern shells (pwsh 7, bash/zsh) - wrap the
 // payload in CSI 200~ / 201~ so embedded newlines are treated as data rather
-// than Enter.
+// than Enter. Inside the wrapper we normalize CRLF/CR to LF so readline-style
+// apps don't submit twice on a single embedded newline.
+//
+// When the shell does NOT advertise bracketed paste (Windows PowerShell 5.1,
+// cmd.exe, dumb shells), normalize newlines to a single CR instead. A bare LF
+// makes legacy PSReadLine render multi-line input in REVERSED order (TASK-161,
+// verified at the pty level); CR delivers each line in order, matching what a
+// real terminal (e.g. Windows Terminal) sends on paste. Collapsing CRLF to a
+// single CR keeps it one Enter per line so readline shells don't double-submit.
 export function prepareClipboardPaste(text: string, bracketedPaste: boolean): string {
-  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  return bracketedPaste ? `\x1b[200~${normalized}\x1b[201~` : normalized;
+  if (bracketedPaste) {
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return `\x1b[200~${normalized}\x1b[201~`;
+  }
+  return text.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
 }
 
 /**

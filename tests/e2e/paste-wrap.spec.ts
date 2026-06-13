@@ -14,25 +14,38 @@ test.describe('prepareClipboardPaste (TASK-28)', () => {
     expect(out).toBe('\x1b[200~hello\nworld\x1b[201~');
   });
 
-  test('with bracketed paste disabled, payload is sent raw (after newline normalize)', () => {
+  test('with bracketed paste disabled, multi-line payload uses CR line endings (TASK-161)', () => {
+    // A bare LF makes legacy PSReadLine reverse multi-line pastes. CR delivers
+    // each line in order, like a real terminal. So the non-bracketed path
+    // converts every newline to a single CR (not LF).
     const out = prepareClipboardPaste('hello\nworld', false);
-    expect(out).toBe('hello\nworld');
+    expect(out).toBe('hello\rworld');
+    expect(out.includes('\n')).toBe(false);
   });
 
-  test('CRLF is normalized to LF whether or not bracketed paste is on', () => {
-    expect(prepareClipboardPaste('a\r\nb\r\nc', false)).toBe('a\nb\nc');
+  test('non-bracketed multi-line paste preserves top-to-bottom line order (TASK-161 regression)', () => {
+    // The reported bug: lines arrived upside-down in PowerShell/cmd. The CR
+    // line endings must keep the lines in their original order.
+    const lines = ['1. first', '2. second', '3. third', '4. fourth'];
+    const out = prepareClipboardPaste(lines.join('\n'), false);
+    expect(out).toBe(lines.join('\r'));
+    expect(out.split('\r')).toEqual(lines);
+  });
+
+  test('CRLF is normalized: LF inside bracketed wrapper, single CR otherwise (TASK-161)', () => {
+    expect(prepareClipboardPaste('a\r\nb\r\nc', false)).toBe('a\rb\rc');
     expect(prepareClipboardPaste('a\r\nb\r\nc', true)).toBe('\x1b[200~a\nb\nc\x1b[201~');
   });
 
-  test('lone CR (old Mac line endings) is normalized to LF', () => {
-    expect(prepareClipboardPaste('a\rb\rc', false)).toBe('a\nb\nc');
+  test('lone CR (old Mac line endings) stays CR when non-bracketed, becomes LF when wrapped', () => {
+    expect(prepareClipboardPaste('a\rb\rc', false)).toBe('a\rb\rc');
     expect(prepareClipboardPaste('a\rb\rc', true)).toBe('\x1b[200~a\nb\nc\x1b[201~');
   });
 
-  test('mixed CRLF + lone CR + LF is normalized cleanly without doubling newlines', () => {
-    // The CRLF→LF pass runs first, then the lone-CR pass. A naive lone-CR
-    // pass that ran before the CRLF pass would turn \r\n into \n\n.
-    expect(prepareClipboardPaste('a\r\nb\rc\nd', false)).toBe('a\nb\nc\nd');
+  test('mixed CRLF + lone CR + LF collapses to single CR without doubling (non-bracketed)', () => {
+    // The CRLF→CR pass runs first, then the lone-LF pass. A naive LF pass that
+    // ran before the CRLF pass would turn \r\n into \r\r.
+    expect(prepareClipboardPaste('a\r\nb\rc\nd', false)).toBe('a\rb\rc\rd');
   });
 
   test('empty string is preserved (no spurious wrapper added)', () => {
