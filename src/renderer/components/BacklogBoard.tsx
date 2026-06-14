@@ -41,6 +41,14 @@ function statusColor(status: string): string {
   return 'var(--accent)';
 }
 
+// Pull the Description section text out of a task body.
+function extractDescription(body: string): string {
+  const m = body.match(/<!--\s*SECTION:DESCRIPTION:BEGIN\s*-->\r?\n([\s\S]*?)\r?\n<!--\s*SECTION:DESCRIPTION:END\s*-->/);
+  if (m) return m[1].trim();
+  const h = body.match(/(^|\n)##\s*Description\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+  return h ? h[2].trim() : '';
+}
+
 function relativeTime(ms: number): string {
   if (!ms) return '';
   const diff = Date.now() - ms;
@@ -1029,12 +1037,18 @@ const TaskDetail: React.FC<{
   const [busy, setBusy] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState('');
+  // Canonical description shown in the read view. Kept as state (not derived
+  // from body) so a save can update it optimistically - otherwise the typed
+  // text briefly vanishes while the file reloads.
+  const [descValue, setDescValue] = useState('');
   const acRef = useRef<AcItem[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     const detail = await api().backlogGetTask(task.project.path, task.sub, task.file);
-    setBody(detail?.body || '');
+    const b = detail?.body || '';
+    setBody(b);
+    setDescValue(extractDescription(b));
     setLoading(false);
   }, [task]);
 
@@ -1093,30 +1107,22 @@ const TaskDetail: React.FC<{
     onChanged();
   };
 
-  // Extract the Description section text (shown as its own editable field).
-  const description = useMemo(() => {
-    const m = body.match(/<!--\s*SECTION:DESCRIPTION:BEGIN\s*-->\r?\n([\s\S]*?)\r?\n<!--\s*SECTION:DESCRIPTION:END\s*-->/);
-    if (m) return m[1].trim();
-    // Fallback: a "## Description" section without the markers.
-    const h = body.match(/(^|\n)##\s*Description\s*\n([\s\S]*?)(?=\n##\s|$)/i);
-    return h ? h[2].trim() : '';
-  }, [body]);
-
   const saveDescription = async () => {
     setEditingDesc(false);
-    if (descDraft === description) return;
-    setBusy(true);
+    if (descDraft === descValue) return;
+    // Optimistically show the new text immediately so it never flashes empty.
+    const prev = descValue;
+    setDescValue(descDraft);
     const r = await api().backlogEditTask({
       projectPath: task.project.path,
       taskId: task.id,
       description: descDraft,
     });
-    setBusy(false);
     if (!r.ok) {
+      setDescValue(prev); // revert on failure
       useTerminalStore.getState().addToast(`Backlog: ${r.error || 'description update failed'}`);
       return;
     }
-    await load();
     onChanged();
   };
 
@@ -1187,12 +1193,12 @@ const TaskDetail: React.FC<{
                 }}
                 autoFocus
               />
-            ) : description ? (
+            ) : descValue ? (
               <div
                 className="md-rendered-content backlog-detail-md backlog-detail-desc-view"
                 title="Click to edit"
-                onClick={() => { setDescDraft(description); setEditingDesc(true); }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(description, { breaks: true, gfm: true }) as string) }}
+                onClick={() => { setDescDraft(descValue); setEditingDesc(true); }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(descValue, { breaks: true, gfm: true }) as string) }}
               />
             ) : (
               <div
