@@ -95,6 +95,30 @@ const PromptComposer: React.FC = () => {
     }
   }, [terminalId, draft, close, setDraft]);
 
+  // Paste an image as a file path (mirrors how a terminal pane handles image
+  // paste): save the clipboard image to a temp file and insert its path at the
+  // caret, so AI CLIs that accept image paths get a usable reference.
+  const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const apiBridge = window.terminalAPI;
+    // Only intercept when there's an image and no plain text (else paste text).
+    if (!apiBridge.clipboardHasImage() || apiBridge.clipboardRead()) return;
+    e.preventDefault();
+    if (!terminalId) return;
+    apiBridge.clipboardSaveImage().then((filePath) => {
+      if (!filePath) return;
+      const el = textareaRef.current;
+      if (el) {
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const next = draft.slice(0, start) + filePath + draft.slice(end);
+        setDraft(terminalId, next);
+        requestAnimationFrame(() => { try { el.selectionStart = el.selectionEnd = start + filePath.length; } catch { /* ignore */ } });
+      } else {
+        setDraft(terminalId, draft + filePath);
+      }
+    }).catch(() => { /* save failed */ });
+  }, [terminalId, draft, setDraft]);
+
   if (!terminalId) return null;
 
   const hasText = draft.length > 0;
@@ -124,7 +148,8 @@ const PromptComposer: React.FC = () => {
           className="prompt-composer-textarea"
           value={draft}
           onChange={(e) => setDraft(terminalId, e.target.value)}
-          placeholder="Write your prompt here. Newlines, paste, and long text all work. Use Copy or Submit when you're ready."
+          onPaste={onPaste}
+          placeholder="Write your prompt here. Newlines, paste, and long text all work. Paste an image to insert its path. Use Copy or Submit when you're ready."
           spellCheck={false}
         />
         <div className="prompt-composer-footer">
