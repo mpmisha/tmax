@@ -333,6 +333,9 @@ const TranscriptPanel: React.FC = () => {
                     useTerminalStore.getState().addToast('Copied to clipboard');
                   }}
                 >
+                  {m.role === 'assistant' && (
+                    <div className="transcript-msg-agent">{isCopilot ? 'Copilot' : 'Claude Code'}</div>
+                  )}
                   {m.role === 'assistant'
                     ? <div className="transcript-bubble md" dangerouslySetInnerHTML={{ __html: renderMd(m.text) }} />
                     : <div className="transcript-bubble">{m.text}</div>}
