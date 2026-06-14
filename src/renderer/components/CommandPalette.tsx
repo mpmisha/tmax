@@ -89,6 +89,7 @@ const CommandPalette: React.FC = () => {
         }
       }},
       { id: 'jumpToPrompt', label: 'Jump to Prompt', shortcut: 'Ctrl+Shift+K', action: () => { const id = focusedId(); if (id) store().showPromptsForTerminal(id); } },
+      { id: 'promptComposer', label: 'Open Prompt Composer', shortcut: 'Ctrl+Alt+P', action: () => { const id = focusedId(); if (id) store().openPromptComposer(id); } },
       { id: 'searchPrompts', label: 'Search Prompts Across All Panes', shortcut: 'Ctrl+Shift+Y', action: () => store().togglePromptSearch() },
       { id: 'shortcuts', label: 'Show Keyboard Shortcuts', shortcut: 'Ctrl+Shift+?', action: () => store().toggleShortcuts() },
       { id: 'settings', label: 'Open Settings', shortcut: 'Ctrl+,', action: () => store().toggleSettings() },
