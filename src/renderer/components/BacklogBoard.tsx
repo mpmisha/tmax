@@ -56,6 +56,7 @@ const api = () => (window as any).terminalAPI as {
   backlogArchiveTask: (path: string, taskId: string) => Promise<{ ok: boolean; error?: string }>;
   backlogValidateProject: (path: string) => Promise<{ ok: boolean }>;
   backlogInitProject: (path: string, name: string) => Promise<{ ok: boolean; error?: string }>;
+  backlogPickFolder: () => Promise<string | null>;
   fileReveal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   clipboardWrite: (text: string) => void;
 };
@@ -487,10 +488,10 @@ const CardContextMenu: React.FC<{
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
     };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey, true);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey, true);
     };
   }, [onClose]);
@@ -572,10 +573,10 @@ const ProjectContextMenu: React.FC<{
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey, true);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey, true);
     };
   }, [onClose]);
@@ -774,13 +775,28 @@ const ProjectSidebar: React.FC<{
 
       {adding ? (
         <div className="backlog-add-form">
-          <input
-            placeholder="Folder path"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void submit()}
-            autoFocus
-          />
+          <div className="backlog-add-path-row">
+            <input
+              placeholder="Folder path"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void submit()}
+              autoFocus
+            />
+            <button
+              className="backlog-browse-btn"
+              title="Browse for folder"
+              onClick={async () => {
+                const picked = await api().backlogPickFolder();
+                if (picked) {
+                  setPath(picked);
+                  if (!name.trim()) setName(picked.split(/[\\/]/).filter(Boolean).pop() || '');
+                }
+              }}
+            >
+              Browse…
+            </button>
+          </div>
           <input
             placeholder="Name (optional)"
             value={name}

@@ -693,3 +693,27 @@
   justify-content: center;
   font-size: 11px;
 }
+
+/* ── Add-project: path + Browse row ── */
+.backlog-add-path-row {
+  display: flex;
+  gap: 6px;
+}
+.backlog-add-path-row input {
+  flex: 1;
+  min-width: 0;
+}
+.backlog-browse-btn {
+  flex-shrink: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.backlog-browse-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}

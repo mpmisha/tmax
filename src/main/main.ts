@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeTheme, net, powerMonitor, screen, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, net, powerMonitor, screen, session, shell } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -741,6 +741,17 @@ function setupKeybindingsFile(): void {
 
 function registerIpcHandlers(): void {
   registerBacklogHandlers();
+
+  // Native folder picker for the Backlog "Add project" flow.
+  ipcMain.handle(IPC.BACKLOG_PICK_FOLDER, async () => {
+    const res = await dialog.showOpenDialog(mainWindow ?? undefined as any, {
+      title: 'Select a project folder',
+      properties: ['openDirectory'],
+    });
+    if (res.canceled || res.filePaths.length === 0) return null;
+    return res.filePaths[0];
+  });
+
   ipcMain.handle(
     IPC.PTY_CREATE,
     (_event, opts: { id: string; shellPath: string; args: string[]; cwd: string; env?: Record<string, string>; cols: number; rows: number; wslDistro?: string }) => {

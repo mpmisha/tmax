@@ -91,6 +91,7 @@ export const IPC = {
   BACKLOG_ARCHIVE_TASK: 'backlog:archiveTask',
   BACKLOG_VALIDATE_PROJECT: 'backlog:validateProject',
   BACKLOG_INIT_PROJECT: 'backlog:initProject',
+  BACKLOG_PICK_FOLDER: 'backlog:pickFolder',
   // ── Keybindings file (TASK-39) ─────────────────────────────────────
   KEYBINDINGS_GET: 'keybindings:get',
   KEYBINDINGS_OPEN_FILE: 'keybindings:openFile',

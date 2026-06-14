@@ -88,6 +88,7 @@ export interface TerminalAPI {
   backlogArchiveTask(projectPath: string, taskId: string): Promise<{ ok: boolean; error?: string }>;
   backlogValidateProject(projectPath: string): Promise<{ ok: boolean }>;
   backlogInitProject(projectPath: string, name: string): Promise<{ ok: boolean; error?: string }>;
+  backlogPickFolder(): Promise<string | null>;
 }
 
 const terminalAPI: TerminalAPI = {
@@ -488,6 +489,9 @@ const terminalAPI: TerminalAPI = {
   },
   backlogInitProject(projectPath, name) {
     return ipcRenderer.invoke(IPC.BACKLOG_INIT_PROJECT, projectPath, name);
+  },
+  backlogPickFolder() {
+    return ipcRenderer.invoke(IPC.BACKLOG_PICK_FOLDER);
   },
 
 };
