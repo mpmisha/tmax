@@ -30,6 +30,7 @@ import FileExplorer from './components/FileExplorer';
 import FloatingRenameInput from './components/FloatingRenameInput';
 import Toast from './components/Toast';
 import SessionSummary from './components/SessionSummary';
+import PromptComposer from './components/PromptComposer';
 import MarkdownPreviewOverlay from './components/MarkdownPreviewOverlay';
 import AppDialogHost from './components/AppDialog';
 
@@ -335,6 +336,7 @@ const App: React.FC = () => {
         <DiffReview />
         <FloatingRenameInput />
         <SessionSummary />
+        <PromptComposer />
         <MarkdownPreviewOverlay />
         <Toast />
         <AppDialogHost />
