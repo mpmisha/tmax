@@ -45,11 +45,23 @@ function matchesCombo(event: KeyboardEvent, combo: KeyCombo): boolean {
   // On macOS, Cmd (metaKey) is the primary app modifier instead of Ctrl
   if (isMac) {
     const shiftedKey = combo.shiftKey ? (MAC_SHIFT_MAP[eventKey] ?? eventKey) : eventKey;
+    // When Option/Alt is held on macOS, event.key contains the special
+    // character the OS produces (Option+P → "π", Option+R → "®", etc.),
+    // not the underlying letter. event.code stays layout-stable
+    // ("KeyP", "KeyR"...) so we fall back to it for letter/digit
+    // shortcuts. Without this, every Cmd+Option+<letter> binding
+    // silently no-ops on Mac.
+    const codeKey = (() => {
+      const c = event.code;
+      if (c.startsWith('Key') && c.length === 4) return c.slice(3).toLowerCase();
+      if (c.startsWith('Digit') && c.length === 6) return c.slice(5);
+      return '';
+    })();
     return (
       event.metaKey === combo.ctrlKey &&
       event.shiftKey === combo.shiftKey &&
       event.altKey === combo.altKey &&
-      (eventKey === combo.key || shiftedKey === combo.key)
+      (eventKey === combo.key || shiftedKey === combo.key || codeKey === combo.key)
     );
   }
   return (
@@ -151,6 +163,9 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   // Ctrl+Alt+N: replace the focused pane with a fresh shell in the same
   // slot. TASK-173.
   'Ctrl+Alt+N': 'replaceTerminal',
+  // Ctrl+Alt+P: open the prompt composer for the focused pane (TASK-180).
+  // Ctrl+Shift+P is the command palette, so Alt instead of Shift.
+  'Ctrl+Alt+P': 'promptComposer',
 };
 
 export function useKeybindings(): void {
@@ -335,6 +350,9 @@ function dispatchAction(action: string): void {
       break;
     case 'showPrompts':
       if (focusedId) store.showPromptsForTerminal(focusedId);
+      break;
+    case 'promptComposer':
+      if (focusedId) store.openPromptComposer(focusedId);
       break;
     case 'searchPrompts':
       store.togglePromptSearch();
