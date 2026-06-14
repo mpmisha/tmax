@@ -315,13 +315,20 @@ const BacklogBoard: React.FC = () => {
     <>
       <div className="backlog-header">
         <span className="backlog-title">Backlog</span>
-        <input
-          className="backlog-search"
-          placeholder="Search title, id, label, assignee, project..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoFocus
-        />
+        <div className={`backlog-search-wrap${query ? ' active' : ''}`}>
+          <input
+            className="backlog-search"
+            placeholder="Search title, id, label, assignee, project..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+          {query && (
+            <button className="backlog-search-clear" onClick={() => setQuery('')} title="Clear filter">
+              ✕
+            </button>
+          )}
+        </div>
         <button className="backlog-refresh" onClick={() => void refresh()} title="Refresh">
           {loading ? '...' : '↻'}
         </button>

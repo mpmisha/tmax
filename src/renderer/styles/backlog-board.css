@@ -67,20 +67,49 @@
   font-weight: 600;
   color: var(--text-primary);
 }
+.backlog-search-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
 .backlog-search {
   flex: 1;
+  min-width: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 18px;
   color: var(--text-primary);
-  padding: 7px 14px;
+  padding: 7px 30px 7px 14px;
   font-size: 13px;
   outline: none;
-  transition: border-color 0.1s, box-shadow 0.1s;
+  transition: border-color 0.1s, box-shadow 0.1s, background 0.1s;
 }
 .backlog-search:focus {
   border-color: var(--focus-border);
   box-shadow: 0 0 0 3px rgba(var(--rgb-accent), 0.15);
+}
+/* Make an active filter obvious so the user knows why the board is filtered. */
+.backlog-search-wrap.active .backlog-search {
+  border-color: var(--accent);
+  background: rgba(var(--rgb-accent), 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--rgb-accent), 0.15);
+}
+.backlog-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px;
+}
+.backlog-search-clear:hover {
+  color: var(--text-primary);
 }
 .backlog-refresh {
   background: transparent;
