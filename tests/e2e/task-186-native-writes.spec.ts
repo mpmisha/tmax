@@ -24,6 +24,37 @@ function gitInit(cwd: string) {
 let cliAvailable = true;
 try { execFileSync('backlog', ['--version'], { shell: isWin } as any); } catch { cliAvailable = false; }
 
+// This one MUST run with no backlog CLI present - it proves a fresh user with
+// nothing installed can init + create + edit + archive entirely via tmax.
+test('full lifecycle works with NO backlog CLI / git (native only)', () => {
+  expect(cliAvailable).toBe(false); // guard: this run has the CLI disabled
+  const dir = mkdtempSync(join(tmpdir(), 'tmax-nocli-'));
+  const fs = require('fs');
+  try {
+    // No git init, no CLI - just tmax's native init.
+    expect(initProject(dir, 'fresh').ok).toBe(true);
+    expect(existsSync(join(dir, 'backlog', 'config.yml'))).toBe(true);
+    expect(existsSync(join(dir, 'backlog', 'tasks'))).toBe(true);
+
+    const c = createTask({ projectPath: dir, title: 'first task', description: 'hello' });
+    expect(c.id).toBe('TASK-1');
+    const tasksDir = join(dir, 'backlog', 'tasks');
+    const read = () => fs.readFileSync(join(tasksDir, fs.readdirSync(tasksDir)[0]), 'utf-8');
+    expect(read()).toMatch(/title: first task/);
+    expect(read()).toMatch(/DESCRIPTION:BEGIN[\s\S]*hello[\s\S]*DESCRIPTION:END/);
+
+    expect(editTask({ projectPath: dir, taskId: 'TASK-1', status: 'In Progress', description: 'updated body' }).ok).toBe(true);
+    expect(read()).toMatch(/status: In Progress/);
+    expect(read()).toMatch(/updated body/);
+
+    expect(archiveTask(dir, 'TASK-1').ok).toBe(true);
+    expect(fs.readdirSync(tasksDir).length).toBe(0);
+    expect(fs.readdirSync(join(dir, 'backlog', 'archive', 'tasks')).length).toBe(1);
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+
 test.describe('native backlog writes are CLI-compatible', () => {
   test.skip(!cliAvailable, 'backlog CLI not on PATH');
 
