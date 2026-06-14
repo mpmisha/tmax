@@ -51,12 +51,12 @@ function relativeTime(ms: number): string {
 const api = () => (window as any).terminalAPI as {
   backlogListTasks: (p: Project[]) => Promise<BacklogTask[]>;
   backlogGetTask: (path: string, sub: string, file: string) => Promise<{ frontmatter: Record<string, unknown>; body: string } | null>;
-  backlogEditTask: (p: { projectPath: string; taskId: string; status?: string; title?: string; checkAc?: number[]; uncheckAc?: number[] }) => Promise<{ ok: boolean; error?: string }>;
+  backlogEditTask: (p: { projectPath: string; taskId: string; status?: string; title?: string; description?: string; checkAc?: number[]; uncheckAc?: number[] }) => Promise<{ ok: boolean; error?: string }>;
   backlogCreateTask: (p: { projectPath: string; title: string; status?: string; description?: string; labels?: string[] }) => Promise<{ ok: boolean; id?: string; error?: string }>;
   backlogArchiveTask: (path: string, taskId: string) => Promise<{ ok: boolean; error?: string }>;
   backlogValidateProject: (path: string) => Promise<{ ok: boolean }>;
   backlogInitProject: (path: string, name: string) => Promise<{ ok: boolean; error?: string }>;
-  backlogPickFolder: () => Promise<string | null>;
+  backlogPickFolder: (defaultPath?: string) => Promise<string | null>;
   fileReveal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   clipboardWrite: (text: string) => void;
 };
@@ -87,7 +87,7 @@ const BacklogBoard: React.FC = () => {
   const displayMode: 'overlay' | 'panel' =
     (config?.backlogDisplayMode as 'overlay' | 'panel' | undefined) ?? 'panel';
   const panelSide: 'left' | 'right' =
-    (config?.backlogPanelSide as 'left' | 'right' | undefined) ?? 'right';
+    (config?.backlogPanelSide as 'left' | 'right' | undefined) ?? 'left';
   const [panelWidth, setPanelWidth] = useState<number>(config?.backlogPanelWidth ?? 640);
   const [sidebarWidth, setSidebarWidth] = useState<number>(220);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -787,7 +787,9 @@ const ProjectSidebar: React.FC<{
               className="backlog-browse-btn"
               title="Browse for folder"
               onClick={async () => {
-                const picked = await api().backlogPickFolder();
+                const st = useTerminalStore.getState();
+                const focused = st.focusedTerminalId ? st.terminals.get(st.focusedTerminalId) : undefined;
+                const picked = await api().backlogPickFolder(focused?.cwd || undefined);
                 if (picked) {
                   setPath(picked);
                   if (!name.trim()) setName(picked.split(/[\\/]/).filter(Boolean).pop() || '');
@@ -984,6 +986,8 @@ const TaskDetail: React.FC<{
   const [editingTitle, setEditingTitle] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [busy, setBusy] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState('');
   const acRef = useRef<AcItem[]>([]);
 
   const load = useCallback(async () => {
@@ -1048,14 +1052,40 @@ const TaskDetail: React.FC<{
     onChanged();
   };
 
+  // Extract the Description section text (shown as its own editable field).
+  const description = useMemo(() => {
+    const m = body.match(/<!--\s*SECTION:DESCRIPTION:BEGIN\s*-->\r?\n([\s\S]*?)\r?\n<!--\s*SECTION:DESCRIPTION:END\s*-->/);
+    if (m) return m[1].trim();
+    // Fallback: a "## Description" section without the markers.
+    const h = body.match(/(^|\n)##\s*Description\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+    return h ? h[2].trim() : '';
+  }, [body]);
+
+  const saveDescription = async () => {
+    setEditingDesc(false);
+    if (descDraft === description) return;
+    setBusy(true);
+    const r = await api().backlogEditTask({
+      projectPath: task.project.path,
+      taskId: task.id,
+      description: descDraft,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      useTerminalStore.getState().addToast(`Backlog: ${r.error || 'description update failed'}`);
+      return;
+    }
+    await load();
+    onChanged();
+  };
+
   // Clean the raw body for display: drop Backlog.md's HTML section/AC markers,
-  // and (when we have an interactive AC list) the whole Acceptance Criteria
-  // section so it isn't shown twice.
+  // the Description (shown as its own editable field above), and (when we have
+  // an interactive AC list) the whole Acceptance Criteria section.
   const bodyText = useMemo(() => {
     let text = body.replace(/<!--[\s\S]*?-->/g, '');
+    text = text.replace(/(^|\n)##\s*Description[\s\S]*?(?=\n##\s|$)/i, '');
     if (acItems.length > 0) {
-      // Drop the whole "## Acceptance Criteria" section up to the next ##
-      // heading or end of body (no /m flag so $ anchors the string end).
       text = text.replace(/(^|\n)##\s*Acceptance Criteria[\s\S]*?(?=\n##\s|$)/i, '');
     }
     return text.replace(/\n{3,}/g, '\n\n').trim();
@@ -1100,6 +1130,40 @@ const TaskDetail: React.FC<{
           {task.assignee.map((a) => <span key={a} className="backlog-chip assignee">{a}</span>)}
         </div>
 
+        {!loading && (
+          <div className="backlog-detail-desc">
+            <div className="backlog-detail-section-h">Description</div>
+            {editingDesc ? (
+              <textarea
+                className="backlog-detail-desc-edit"
+                value={descDraft}
+                onChange={(e) => setDescDraft(e.target.value)}
+                onBlur={() => void saveDescription()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') { setEditingDesc(false); }
+                  // Ctrl/Cmd+Enter saves; plain Enter inserts a newline.
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void saveDescription(); }
+                }}
+                autoFocus
+              />
+            ) : description ? (
+              <div
+                className="md-rendered-content backlog-detail-md backlog-detail-desc-view"
+                title="Click to edit"
+                onClick={() => { setDescDraft(description); setEditingDesc(true); }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(description, { breaks: true, gfm: true }) as string) }}
+              />
+            ) : (
+              <div
+                className="backlog-detail-desc-empty"
+                onClick={() => { setDescDraft(''); setEditingDesc(true); }}
+              >
+                Add a description…
+              </div>
+            )}
+          </div>
+        )}
+
         {acItems.length > 0 && (
           <div className="backlog-detail-ac">
             <div className="backlog-detail-section-h">Acceptance Criteria</div>
@@ -1120,12 +1184,12 @@ const TaskDetail: React.FC<{
         <div className="backlog-detail-body">
           {loading ? (
             <div className="backlog-detail-loading">Loading...</div>
-          ) : (
+          ) : bodyText ? (
             <div
               className="md-rendered-content backlog-detail-md"
               dangerouslySetInnerHTML={{ __html: bodyHtml }}
             />
-          )}
+          ) : null}
         </div>
 
         <div className="backlog-detail-footer">

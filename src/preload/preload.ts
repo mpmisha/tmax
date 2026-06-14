@@ -83,12 +83,12 @@ export interface TerminalAPI {
   // ── Backlog board (TASK-167) ────────────────────────────────────
   backlogListTasks(projects: { name: string; path: string }[]): Promise<BacklogTask[]>;
   backlogGetTask(projectPath: string, sub: string, file: string): Promise<{ frontmatter: Record<string, unknown>; body: string } | null>;
-  backlogEditTask(payload: { projectPath: string; taskId: string; status?: string; title?: string; checkAc?: number[]; uncheckAc?: number[] }): Promise<{ ok: boolean; error?: string }>;
+  backlogEditTask(payload: { projectPath: string; taskId: string; status?: string; title?: string; description?: string; checkAc?: number[]; uncheckAc?: number[] }): Promise<{ ok: boolean; error?: string }>;
   backlogCreateTask(payload: { projectPath: string; title: string; status?: string; description?: string; labels?: string[] }): Promise<{ ok: boolean; id?: string; error?: string }>;
   backlogArchiveTask(projectPath: string, taskId: string): Promise<{ ok: boolean; error?: string }>;
   backlogValidateProject(projectPath: string): Promise<{ ok: boolean }>;
   backlogInitProject(projectPath: string, name: string): Promise<{ ok: boolean; error?: string }>;
-  backlogPickFolder(): Promise<string | null>;
+  backlogPickFolder(defaultPath?: string): Promise<string | null>;
 }
 
 const terminalAPI: TerminalAPI = {
@@ -490,8 +490,8 @@ const terminalAPI: TerminalAPI = {
   backlogInitProject(projectPath, name) {
     return ipcRenderer.invoke(IPC.BACKLOG_INIT_PROJECT, projectPath, name);
   },
-  backlogPickFolder() {
-    return ipcRenderer.invoke(IPC.BACKLOG_PICK_FOLDER);
+  backlogPickFolder(defaultPath) {
+    return ipcRenderer.invoke(IPC.BACKLOG_PICK_FOLDER, defaultPath);
   },
 
 };

@@ -742,10 +742,12 @@ function setupKeybindingsFile(): void {
 function registerIpcHandlers(): void {
   registerBacklogHandlers();
 
-  // Native folder picker for the Backlog "Add project" flow.
-  ipcMain.handle(IPC.BACKLOG_PICK_FOLDER, async () => {
+  // Native folder picker for the Backlog "Add project" flow. Opens at the
+  // caller-supplied directory (the focused pane's cwd) when given.
+  ipcMain.handle(IPC.BACKLOG_PICK_FOLDER, async (_e, defaultPath?: string) => {
     const res = await dialog.showOpenDialog(mainWindow ?? undefined as any, {
       title: 'Select a project folder',
+      defaultPath: defaultPath || undefined,
       properties: ['openDirectory'],
     });
     if (res.canceled || res.filePaths.length === 0) return null;

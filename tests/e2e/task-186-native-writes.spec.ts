@@ -58,6 +58,11 @@ test.describe('native backlog writes are CLI-compatible', () => {
       expect(plain).toMatch(/Status:.*In Progress/);
       expect(plain).toContain('Renamed gizmo');
 
+      // 4b. Native description edit -> CLI shows it in the Description section.
+      expect(editTask({ projectPath: dir, taskId: 'TASK-1', description: 'A freshly edited body.' }).ok).toBe(true);
+      plain = backlog(dir, ['task', '1', '--plain']);
+      expect(plain).toContain('A freshly edited body.');
+
       // 5. Native archive -> task leaves the active list.
       expect(archiveTask(dir, 'TASK-1').ok).toBe(true);
       const list = backlog(dir, ['task', 'list', '--plain']);

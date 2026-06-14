@@ -77,6 +77,7 @@ export interface EditPayload {
   taskId: string;
   status?: string;
   title?: string;
+  description?: string;
   checkAc?: number[];
   uncheckAc?: number[];
 }
@@ -128,6 +129,18 @@ export function editTask(p: EditPayload): { ok: boolean; error?: string } {
       }
     }
     body = lines.join(eol);
+    changed = true;
+  }
+
+  // Replace the Description section body (create it if the task has none).
+  if (typeof p.description === 'string') {
+    const re = /(<!--\s*SECTION:DESCRIPTION:BEGIN\s*-->\r?\n)([\s\S]*?)(\r?\n<!--\s*SECTION:DESCRIPTION:END\s*-->)/;
+    if (re.test(body)) {
+      body = body.replace(re, `$1${p.description}$3`);
+    } else {
+      body = body.replace(/\s*$/, '') +
+        `\n\n## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\n${p.description}\n<!-- SECTION:DESCRIPTION:END -->\n`;
+    }
     changed = true;
   }
 

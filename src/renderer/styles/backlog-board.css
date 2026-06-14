@@ -717,3 +717,44 @@
   color: var(--text-primary);
   border-color: var(--accent);
 }
+
+/* ── Editable description in the detail modal ── */
+.backlog-detail-desc {
+  padding: 0 16px 12px;
+}
+.backlog-detail-desc-view {
+  cursor: text;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: 0 -6px;
+}
+.backlog-detail-desc-view:hover {
+  background: var(--bg-secondary);
+}
+.backlog-detail-desc-empty {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 13px;
+  cursor: text;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 6px;
+}
+.backlog-detail-desc-empty:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.backlog-detail-desc-edit {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  background: var(--bg-secondary);
+  border: 1px solid var(--focus-border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+}

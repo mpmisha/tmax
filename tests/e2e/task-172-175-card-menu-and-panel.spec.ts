@@ -59,8 +59,8 @@ test('card right-click menu and side-panel mode', async () => {
     await expect(panel).toBeVisible({ timeout: 5_000 });
     await expect(window.locator('.backlog-window')).toHaveCount(0);
     await expect(window.locator('.terminal-panel').first()).toBeVisible();
-    // Default side is right.
-    await expect(panel).toHaveClass(/side-right/);
+    // Default side is left.
+    await expect(panel).toHaveClass(/side-left/);
 
     // Collapse the project sidebar via the splitter control, then re-expand.
     await expect(window.locator('.backlog-sidebar-wrap')).not.toHaveClass(/collapsed/);
