@@ -107,7 +107,7 @@ const CommandPalette: React.FC = () => {
       ...(focusedAiSessionId ? [{
         id: 'promptComposer',
         label: 'Open Prompt Composer',
-        shortcut: 'Ctrl+Alt+P',
+        shortcut: 'Ctrl+Alt+C',
         action: () => { const id = focusedId(); if (id) store().openPromptComposer(id); },
       }] : []),
       { id: 'searchPrompts', label: 'Search Prompts Across All Panes', shortcut: 'Ctrl+Shift+Y', action: () => store().togglePromptSearch() },

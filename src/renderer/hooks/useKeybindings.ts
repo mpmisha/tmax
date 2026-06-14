@@ -163,9 +163,9 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   // Ctrl+Alt+N: replace the focused pane with a fresh shell in the same
   // slot. TASK-173.
   'Ctrl+Alt+N': 'replaceTerminal',
-  // Ctrl+Alt+P: open the prompt composer for the focused pane (TASK-180).
+  // Ctrl+Alt+C: open the prompt composer for the focused pane (TASK-180).
   // Ctrl+Shift+P is the command palette, so Alt instead of Shift.
-  'Ctrl+Alt+P': 'promptComposer',
+  'Ctrl+Alt+C': 'promptComposer',
 };
 
 export function useKeybindings(): void {
