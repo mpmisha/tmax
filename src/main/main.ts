@@ -19,6 +19,7 @@ import { initDiagLogger, getDiagLogPath, diagLog, sanitize, readDiagLogTail } fr
 import { GitDiffService, resolveGitRoot } from './git-diff-service';
 import { listWorktrees, createWorktree, deleteWorktree, getBranches } from './git-worktree-service';
 import { getDescendantNames } from './process-tree';
+import { registerBacklogHandlers } from './backlog-service';
 import type { DiffMode } from '../shared/diff-types';
 import * as chokidar from 'chokidar';
 import type { FSWatcher } from 'chokidar';
@@ -739,6 +740,7 @@ function setupKeybindingsFile(): void {
 }
 
 function registerIpcHandlers(): void {
+  registerBacklogHandlers();
   ipcMain.handle(
     IPC.PTY_CREATE,
     (_event, opts: { id: string; shellPath: string; args: string[]; cwd: string; env?: Record<string, string>; cols: number; rows: number; wslDistro?: string }) => {

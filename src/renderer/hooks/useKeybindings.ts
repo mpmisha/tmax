@@ -105,6 +105,7 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   'Ctrl+Shift+H': 'toggleDormant',
   'Ctrl+Shift+E': 'equalizeLayout',
   'Ctrl+,': 'openSettings',
+  'Ctrl+Alt+B': 'openBacklog',
   'Ctrl+Shift+R': 'renameTerminal',
   'Ctrl+Shift+?': 'showShortcuts',
   'Ctrl+Shift+G': 'switchTerminalList',
@@ -291,6 +292,9 @@ function dispatchAction(action: string): void {
       break;
     case 'openSettings':
       store.toggleSettings();
+      break;
+    case 'openBacklog':
+      store.toggleBacklog();
       break;
     case 'dirPicker':
       store.toggleDirPicker();

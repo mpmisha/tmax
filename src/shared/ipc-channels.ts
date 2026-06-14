@@ -83,6 +83,14 @@ export const IPC = {
   GIT_CREATE_WORKTREE: 'git:createWorktree',
   GIT_DELETE_WORKTREE: 'git:deleteWorktree',
   GIT_GET_BRANCHES: 'git:getBranches',
+  // ── Backlog board (TASK-167) ───────────────────────────────────────
+  BACKLOG_LIST_TASKS: 'backlog:listTasks',
+  BACKLOG_GET_TASK: 'backlog:getTask',
+  BACKLOG_EDIT_TASK: 'backlog:editTask',
+  BACKLOG_CREATE_TASK: 'backlog:createTask',
+  BACKLOG_ARCHIVE_TASK: 'backlog:archiveTask',
+  BACKLOG_VALIDATE_PROJECT: 'backlog:validateProject',
+  BACKLOG_INIT_PROJECT: 'backlog:initProject',
   // ── Keybindings file (TASK-39) ─────────────────────────────────────
   KEYBINDINGS_GET: 'keybindings:get',
   KEYBINDINGS_OPEN_FILE: 'keybindings:openFile',

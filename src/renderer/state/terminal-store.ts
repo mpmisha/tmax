@@ -880,6 +880,7 @@ interface TerminalStore {
   showShortcuts: boolean;
   showCommandPalette: boolean;
   showSettings: boolean;
+  showBacklog: boolean;
   tabBarPosition: 'top' | 'bottom' | 'left' | 'right';
   hideTabTitles: boolean;
   hideTabCloseButtons: boolean;
@@ -1006,6 +1007,8 @@ interface TerminalStore {
   toggleShortcuts: () => void;
   toggleCommandPalette: () => void;
   toggleSettings: () => void;
+  toggleBacklog: () => void;
+  closeBacklog: () => void;
   closeSettings: () => void;
   updateConfig: (update: Partial<AppConfig>) => Promise<void>;
   toggleTabBarPosition: () => void;
@@ -1305,6 +1308,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   showShortcuts: false,
   showCommandPalette: false,
   showSettings: false,
+  showBacklog: false,
   showDirPicker: false,
   showFileExplorer: false,
   fileExplorerTargetPath: null,
@@ -2489,6 +2493,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   closeSettings: () => {
     set({ showSettings: false });
+  },
+
+  toggleBacklog: () => {
+    set((state) => ({ showBacklog: !state.showBacklog }));
+  },
+
+  closeBacklog: () => {
+    set({ showBacklog: false });
   },
 
   updateConfig: async (update: Partial<AppConfig>) => {

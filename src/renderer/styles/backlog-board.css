@@ -1,0 +1,695 @@
+/* Backlog board view (TASK-167). Full-window overlay, themed via the
+   app-wide CSS variables in global.css so theme presets recolor it too. */
+
+.backlog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.backlog-window {
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Docked side-panel mode: lives in the flex row beside the terminal grid.
+   CSS `order` flips it to the left or right of the grid without moving it in
+   the DOM. (TASK-175 / TASK-179) */
+.backlog-panel {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.backlog-panel.side-right {
+  order: 1;
+  border-left: 1px solid var(--border-color);
+}
+.backlog-panel.side-left {
+  order: -1;
+  border-right: 1px solid var(--border-color);
+}
+.backlog-panel-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.backlog-panel.side-right .backlog-panel-resize { left: 0; }
+.backlog-panel.side-left .backlog-panel-resize { right: 0; }
+.backlog-panel-resize:hover {
+  background: var(--accent);
+}
+
+/* ── Header ── */
+.backlog-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+.backlog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.backlog-search {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+}
+.backlog-search:focus {
+  border-color: var(--focus-border);
+}
+.backlog-refresh {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+}
+.backlog-refresh:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.backlog-layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ── Sidebar ── */
+/* Width is controlled by the wrap so it can be resized + collapsed; the inner
+   nav fills it. (TASK-179) */
+.backlog-sidebar-wrap {
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+}
+.backlog-sidebar-wrap.collapsed {
+  width: 0 !important;
+}
+.backlog-sidebar {
+  width: 100%;
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Draggable / collapsible divider between the sidebar and the board. */
+.backlog-sidebar-splitter {
+  position: relative;
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border-color);
+}
+.backlog-sidebar-splitter.collapsed {
+  cursor: default;
+}
+.backlog-sidebar-splitter:hover {
+  background: var(--accent);
+}
+.backlog-sidebar-collapse {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  z-index: 6;
+}
+.backlog-sidebar-collapse:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+.backlog-proj-all,
+.backlog-add-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.backlog-proj-all:hover,
+.backlog-add-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.backlog-proj-all.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+.backlog-add-btn {
+  margin-top: 6px;
+  color: var(--accent);
+}
+.backlog-add-btn.subtle {
+  margin-top: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.backlog-add-btn.subtle:hover {
+  color: var(--accent);
+}
+
+.backlog-proj {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.backlog-proj.active {
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+}
+.backlog-proj:hover {
+  background: var(--bg-secondary);
+}
+.backlog-proj-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 7px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 0;
+}
+/* Identity color tag for a project - a rounded square, NOT a round dot, so it
+   doesn't read as an online/offline status LED. (TASK-177) */
+.backlog-proj-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.backlog-proj-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.backlog-proj-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.backlog-proj-actions {
+  display: none;
+  gap: 2px;
+  padding-right: 4px;
+}
+.backlog-proj:hover .backlog-proj-actions {
+  display: flex;
+}
+.backlog-proj-actions button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.backlog-proj-actions button:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+.backlog-proj-actions button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.backlog-proj-remove:hover:not(:disabled) {
+  color: var(--accent-danger) !important;
+}
+
+.backlog-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  margin-top: 6px;
+}
+.backlog-add-form input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.backlog-add-form input:focus {
+  border-color: var(--focus-border);
+}
+.backlog-add-error {
+  color: var(--accent-danger);
+  font-size: 11px;
+}
+.backlog-add-buttons {
+  display: flex;
+  gap: 6px;
+}
+.backlog-add-buttons button {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-primary);
+  padding: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.backlog-add-buttons button:first-child {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+/* ── Board ── */
+.backlog-board {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  overflow-x: auto;
+  min-width: 0;
+}
+.backlog-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.backlog-empty-hint {
+  font-size: 12px;
+  margin-top: 6px;
+}
+.backlog-empty code {
+  background: var(--bg-secondary);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.backlog-column {
+  flex: 1 1 0;
+  min-width: 300px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  border: 1px solid transparent;
+  transition: border-color 0.1s;
+}
+.backlog-column.drag-over {
+  border-color: var(--accent);
+}
+.backlog-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+.backlog-col-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.backlog-col-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.backlog-col-add {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.backlog-col-add:hover {
+  color: var(--accent);
+}
+.backlog-create {
+  padding: 8px;
+  border-top: 1px solid var(--border-color);
+}
+.backlog-create input {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--focus-border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+/* ── Card ── */
+.backlog-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 9px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.backlog-card:hover {
+  border-color: var(--accent);
+}
+.backlog-card-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+.backlog-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.backlog-card-proj {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.backlog-card-id {
+  font-family: monospace;
+}
+.backlog-card-time {
+  margin-left: auto;
+}
+.backlog-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.backlog-chip {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.backlog-chip.assignee {
+  background: rgba(var(--rgb-accent), 0.18);
+  color: var(--accent);
+}
+.backlog-chip.label {
+  background: rgba(var(--rgb-accent-warning), 0.15);
+  color: var(--accent-warning);
+}
+
+/* ── Detail modal ── */
+.backlog-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1010;
+}
+.backlog-detail {
+  width: 680px;
+  max-width: 92vw;
+  max-height: 86vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.backlog-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+.backlog-detail-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.backlog-detail-status {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: rgba(var(--rgb-accent), 0.18);
+  color: var(--accent);
+}
+.backlog-detail-header .shortcuts-close {
+  margin-left: auto;
+}
+.backlog-detail-title,
+.backlog-detail-title-edit {
+  margin: 0;
+  padding: 12px 16px 4px;
+  font-size: 18px;
+  color: var(--text-primary);
+}
+.backlog-detail-title {
+  cursor: text;
+}
+.backlog-detail-title:hover {
+  background: var(--bg-secondary);
+}
+.backlog-detail-title-edit {
+  background: var(--bg-secondary);
+  border: 1px solid var(--focus-border);
+  border-radius: 6px;
+  margin: 8px 14px 4px;
+  padding: 8px 10px;
+  outline: none;
+}
+.backlog-detail-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 4px 16px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.backlog-detail-ac {
+  padding: 0 16px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+.backlog-detail-section-h {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 8px 0;
+}
+.backlog-ac-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.backlog-ac-row .done {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+.backlog-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.backlog-detail-body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.backlog-detail-loading {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.backlog-detail-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-color);
+}
+.backlog-archive-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.backlog-archive-btn:hover:not(:disabled) {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+}
+
+/* ── Detail footer buttons (TASK: Close vs Archive) ── */
+.backlog-detail-footer {
+  justify-content: flex-end;
+  gap: 8px;
+}
+.backlog-detail-archive {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.backlog-detail-archive:hover:not(:disabled) {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+}
+.backlog-detail-close {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--bg-primary);
+  padding: 6px 18px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.backlog-detail-close:hover {
+  filter: brightness(1.1);
+}
+
+/* Rendered markdown inside the detail body. */
+.backlog-detail-md {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+.backlog-detail-md h1,
+.backlog-detail-md h2,
+.backlog-detail-md h3 {
+  font-size: 14px;
+  margin: 12px 0 6px;
+  color: var(--text-primary);
+}
+.backlog-detail-md p { margin: 6px 0; }
+.backlog-detail-md ul,
+.backlog-detail-md ol { margin: 6px 0; padding-left: 20px; }
+.backlog-detail-md code {
+  background: var(--bg-secondary);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.backlog-detail-md pre {
+  background: var(--bg-secondary);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.backlog-detail-md pre code { background: none; padding: 0; }
+.backlog-detail-md a { color: var(--accent); }
+
+/* ── Pending (optimistic) create card ── */
+.backlog-card.pending {
+  opacity: 0.6;
+  cursor: default;
+  border-style: dashed;
+}
+
+/* ── Project color picker submenu ── */
+.context-menu-sub.backlog-color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  max-width: 168px;
+}
+.backlog-color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.backlog-color-swatch:hover { border-color: var(--text-primary); }
+.backlog-color-swatch.active { border-color: var(--text-primary); }
+.backlog-color-swatch.clear {
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}

@@ -21,6 +21,7 @@ import PaneHintOverlay from './components/PaneHintOverlay';
 import StatusBar from './components/StatusBar';
 import ShortcutsHelp from './components/ShortcutsHelp';
 import Settings from './components/Settings';
+import BacklogBoard from './components/BacklogBoard';
 import CommandPalette from './components/CommandPalette';
 import DirPanel from './components/DirPanel';
 import CopilotPanel from './components/CopilotPanel';
@@ -325,6 +326,7 @@ const App: React.FC = () => {
             <CopilotPanel />
             <WorktreePanel />
             <FileExplorer />
+            <BacklogBoard />
             <div className="layout-area">
               <TilingLayout />
               <FloatingLayer />

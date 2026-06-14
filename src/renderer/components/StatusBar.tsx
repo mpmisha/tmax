@@ -528,6 +528,13 @@ const StatusBar: React.FC = () => {
           >
             &#127793; Worktrees
           </button>
+          <button
+            className="status-mode-btn"
+            onClick={() => useTerminalStore.getState().toggleBacklog()}
+            title={formatKeyForPlatform('Backlog Board (Ctrl+Alt+B)')}
+          >
+            &#128450;&#65039; Backlog
+          </button>
         </div>
         <div className="status-section status-center">
           {currentTip && (

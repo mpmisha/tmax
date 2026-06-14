@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, clipboard } from 'electron';
 import { IPC } from '../shared/ipc-channels';
 import type { DiffMode, DiffResult, AnnotatedFile } from '../shared/diff-types';
 import type { RepoWorktrees } from '../shared/worktree-types';
+import type { BacklogTask } from '../shared/backlog-types';
 
 export interface PtyDiag {
   pid: number;
@@ -78,6 +79,15 @@ export interface TerminalAPI {
   onSessionFileChanged(cb: () => void): () => void;
   // ── Child process tree query (TASK-171) ────────────────────────────
   getPtyChildProcesses(ptyId: string): Promise<string[]>;
+
+  // ── Backlog board (TASK-167) ────────────────────────────────────
+  backlogListTasks(projects: { name: string; path: string }[]): Promise<BacklogTask[]>;
+  backlogGetTask(projectPath: string, sub: string, file: string): Promise<{ frontmatter: Record<string, unknown>; body: string } | null>;
+  backlogEditTask(payload: { projectPath: string; taskId: string; status?: string; title?: string; checkAc?: number[]; uncheckAc?: number[] }): Promise<{ ok: boolean; error?: string }>;
+  backlogCreateTask(payload: { projectPath: string; title: string; status?: string; description?: string; labels?: string[] }): Promise<{ ok: boolean; id?: string; error?: string }>;
+  backlogArchiveTask(projectPath: string, taskId: string): Promise<{ ok: boolean; error?: string }>;
+  backlogValidateProject(projectPath: string): Promise<{ ok: boolean }>;
+  backlogInitProject(projectPath: string, name: string): Promise<{ ok: boolean; error?: string }>;
 }
 
 const terminalAPI: TerminalAPI = {
@@ -455,6 +465,29 @@ const terminalAPI: TerminalAPI = {
   // ── Child process tree query (TASK-171) ────────────────────────────
   getPtyChildProcesses(ptyId: string) {
     return ipcRenderer.invoke(IPC.PTY_GET_CHILD_PROCESSES, ptyId);
+  },
+
+  // ── Backlog board (TASK-167) ────────────────────────────────────
+  backlogListTasks(projects) {
+    return ipcRenderer.invoke(IPC.BACKLOG_LIST_TASKS, projects);
+  },
+  backlogGetTask(projectPath, sub, file) {
+    return ipcRenderer.invoke(IPC.BACKLOG_GET_TASK, projectPath, sub, file);
+  },
+  backlogEditTask(payload) {
+    return ipcRenderer.invoke(IPC.BACKLOG_EDIT_TASK, payload);
+  },
+  backlogCreateTask(payload) {
+    return ipcRenderer.invoke(IPC.BACKLOG_CREATE_TASK, payload);
+  },
+  backlogArchiveTask(projectPath, taskId) {
+    return ipcRenderer.invoke(IPC.BACKLOG_ARCHIVE_TASK, projectPath, taskId);
+  },
+  backlogValidateProject(projectPath) {
+    return ipcRenderer.invoke(IPC.BACKLOG_VALIDATE_PROJECT, projectPath);
+  },
+  backlogInitProject(projectPath, name) {
+    return ipcRenderer.invoke(IPC.BACKLOG_INIT_PROJECT, projectPath, name);
   },
 
 };

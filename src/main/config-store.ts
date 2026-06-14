@@ -122,6 +122,19 @@ export interface AppConfig {
    * ('alpha'). (TASK-135)
    */
   aiGroupByRepoOrder?: 'activity' | 'alpha';
+  /**
+   * Projects shown in the native Backlog board view (TASK-167). Each entry
+   * is a display name + absolute path to a folder containing a `backlog/`
+   * directory. Replaces the standalone backlog-hub app's config.json.
+   */
+  backlogProjects?: Array<{ name: string; path: string }>;
+  /** How the Backlog board is shown: full-window 'overlay' (default) or a
+   *  docked 'panel' beside the terminal grid. (TASK-175) */
+  backlogDisplayMode?: 'overlay' | 'panel';
+  /** Width in px of the docked Backlog panel. (TASK-175) */
+  backlogPanelWidth?: number;
+  /** Which side the docked Backlog panel sits on. Default 'right'. (TASK-179) */
+  backlogPanelSide?: 'left' | 'right';
 }
 
 function findPwsh(): string | null {

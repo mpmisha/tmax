@@ -99,6 +99,7 @@ const CommandPalette: React.FC = () => {
       { id: 'toggleTranscript', label: 'Toggle Session Transcript', shortcut: 'Ctrl+Alt+T', action: () => store().toggleTranscript() },
       { id: 'shortcuts', label: 'Show Keyboard Shortcuts', shortcut: 'Ctrl+Shift+?', action: () => store().toggleShortcuts() },
       { id: 'settings', label: 'Open Settings', shortcut: 'Ctrl+,', action: () => store().toggleSettings() },
+      { id: 'backlog', label: 'Open Backlog Board', shortcut: 'Ctrl+Alt+B', action: () => store().toggleBacklog() },
       { id: 'tabsFlatMode', label: 'Tabs: Use flat mode (one tab per terminal)', action: () => {
         store().updateConfig({ tabMode: 'flat' });
       }},
