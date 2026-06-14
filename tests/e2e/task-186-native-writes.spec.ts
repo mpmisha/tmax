@@ -73,6 +73,46 @@ test.describe('native backlog writes are CLI-compatible', () => {
     }
   });
 
+  test('editing the description of a task created WITHOUT one persists to disk', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-native-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      // Create with NO description (the board's "+ Add task" path).
+      const c = createTask({ projectPath: dir, title: 'testing something' });
+      expect(c.id).toBe('TASK-1');
+      const r = editTask({ projectPath: dir, taskId: 'TASK-1', description: '234' });
+      expect(r.ok).toBe(true);
+      // Read the file straight off disk - the description must be persisted.
+      const f = join(dir, 'backlog', 'tasks', require('fs').readdirSync(join(dir, 'backlog', 'tasks'))[0]);
+      const content = require('fs').readFileSync(f, 'utf-8');
+      expect(content).toMatch(/DESCRIPTION:BEGIN[\s\S]*234[\s\S]*DESCRIPTION:END/);
+      // And the real CLI reads it back.
+      expect(backlog(dir, ['task', '1', '--plain'])).toContain('234');
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  test('description edit works on a CRLF file (git-checkout style)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-native-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      createTask({ projectPath: dir, title: 'crlf task' });
+      // Rewrite the created file with CRLF endings to mimic a git checkout.
+      const fs = require('fs');
+      const dirT = join(dir, 'backlog', 'tasks');
+      const f = join(dirT, fs.readdirSync(dirT)[0]);
+      fs.writeFileSync(f, fs.readFileSync(f, 'utf-8').replace(/\r?\n/g, '\r\n'), 'utf-8');
+      const r = editTask({ projectPath: dir, taskId: 'TASK-1', description: 'crlf body' });
+      expect(r.ok).toBe(true);
+      expect(fs.readFileSync(f, 'utf-8')).toMatch(/DESCRIPTION:BEGIN[\s\S]*crlf body[\s\S]*DESCRIPTION:END/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
   test('id allocation increments and zero-pad config is respected', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tmax-native-'));
     try {
