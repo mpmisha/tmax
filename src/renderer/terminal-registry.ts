@@ -50,7 +50,9 @@ export function getCurrentInputLine(id: string): string {
   const buf = entry.terminal.buffer.active;
   const line = buf.getLine(buf.baseY + buf.cursorY);
   if (!line) return '';
-  let text = line.translateToString(false, 0, buf.cursorX);
+  // Full cursor row (trimmed right), not just up to the caret - the caret may
+  // sit mid-line. (Multi-line input in an AI-CLI box can't be reliably read.)
+  let text = line.translateToString(true);
   // Box-drawing / block chars -> spaces (Copilot/Claude input boxes).
   text = text.replace(/[─-▟]/g, ' ').trimStart();
   // Strip a leading shell prompt, if present.

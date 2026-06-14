@@ -5,7 +5,7 @@ import { prepareClipboardPaste } from '../utils/paste';
 /**
  * Notepad-style scratchpad for composing long, multi-line prompts before
  * pasting them into the terminal. Opened from the per-pane context menu
- * (TerminalPanel → "📝 Prompt composer").
+ * (TerminalPanel → "📝 Prompt Editor").
  *
  * Why this exists: editing multi-line text directly in a terminal is
  * awkward - newlines and paste are fiddly, and a stray Enter submits a
@@ -130,10 +130,10 @@ const PromptComposer: React.FC = () => {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Prompt composer"
+        aria-label="Prompt Editor"
       >
         <div className="prompt-composer-header">
-          <span className="prompt-composer-title">📝 Prompt composer</span>
+          <span className="prompt-composer-title">📝 Prompt Editor</span>
           <button
             className="prompt-composer-close-x"
             onClick={close}

@@ -21,7 +21,7 @@ interface Command {
 const CommandPalette: React.FC = () => {
   const show = useTerminalStore((s) => s.showCommandPalette);
   // Subscribe to the focused pane's aiSessionId so commands that only make
-  // sense for an AI session (Prompt Composer, etc.) can be filtered out
+  // sense for an AI session (Prompt Editor, etc.) can be filtered out
   // when the user has a plain shell focused.
   const focusedAiSessionId = useTerminalStore((s) => {
     const id = s.focusedTerminalId;
@@ -102,11 +102,11 @@ const CommandPalette: React.FC = () => {
         }
       }},
       { id: 'jumpToPrompt', label: 'Jump to Prompt', shortcut: 'Ctrl+Shift+K', action: () => { const id = focusedId(); if (id) store().showPromptsForTerminal(id); } },
-      // Prompt composer is AI-session-only (mirrors the per-pane context
+      // Prompt Editor is AI-session-only (mirrors the per-pane context
       // menu). Hide the entry when the focused pane isn't an AI session.
       ...(focusedAiSessionId ? [{
         id: 'promptComposer',
-        label: 'Open Prompt Composer',
+        label: 'Open Prompt Editor',
         shortcut: 'Ctrl+Alt+C',
         action: () => { const id = focusedId(); if (id) store().openPromptComposer(id); },
       }] : []),

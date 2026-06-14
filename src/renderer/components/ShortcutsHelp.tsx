@@ -33,7 +33,7 @@ const shortcuts = [
   ]},
   { category: 'AI', items: [
     { key: 'Ctrl+Shift+K', action: 'Jump to prompt in terminal' },
-    { key: 'Ctrl+Alt+C', action: 'Open prompt composer' },
+    { key: 'Ctrl+Alt+C', action: 'Open prompt editor' },
     { key: 'Ctrl+Shift+C', action: 'AI Sessions panel' },
     { key: 'Ctrl+Alt+T', action: 'Toggle session transcript' },
   ]},

@@ -5423,13 +5423,17 @@ select.settings-input {
   border-left-color: var(--focus-border);
 }
 
+/* Running (non-idle) session: tint the whole row so it's clearly "live",
+   not just the small status dot. */
 .ai-session-item.active {
   border-left-color: transparent;
+  background: rgba(var(--rgb-accent), 0.10);
 }
 
 .ai-session-item.active.selected,
 .ai-session-item.active:hover {
   border-left-color: var(--focus-border);
+  background: rgba(var(--rgb-accent), 0.17);
 }
 
 /* TASK-36: row whose session belongs to the currently focused pane.
