@@ -81,11 +81,12 @@ export interface TerminalAPI {
   getPtyChildProcesses(ptyId: string): Promise<string[]>;
 
   // ── Backlog board (TASK-167) ────────────────────────────────────
-  backlogListTasks(projects: { name: string; path: string }[]): Promise<BacklogTask[]>;
+  backlogListTasks(projects: { name: string; path: string }[], includeArchived?: boolean): Promise<BacklogTask[]>;
   backlogGetTask(projectPath: string, sub: string, file: string): Promise<{ frontmatter: Record<string, unknown>; body: string } | null>;
   backlogEditTask(payload: { projectPath: string; taskId: string; status?: string; title?: string; description?: string; checkAc?: number[]; uncheckAc?: number[] }): Promise<{ ok: boolean; error?: string }>;
   backlogCreateTask(payload: { projectPath: string; title: string; status?: string; description?: string; labels?: string[] }): Promise<{ ok: boolean; id?: string; error?: string }>;
   backlogArchiveTask(projectPath: string, taskId: string): Promise<{ ok: boolean; error?: string }>;
+  backlogDeleteTask(projectPath: string, taskId: string): Promise<{ ok: boolean; error?: string }>;
   backlogValidateProject(projectPath: string): Promise<{ ok: boolean }>;
   backlogInitProject(projectPath: string, name: string): Promise<{ ok: boolean; error?: string }>;
   backlogPickFolder(defaultPath?: string): Promise<string | null>;
@@ -470,8 +471,8 @@ const terminalAPI: TerminalAPI = {
   },
 
   // ── Backlog board (TASK-167) ────────────────────────────────────
-  backlogListTasks(projects) {
-    return ipcRenderer.invoke(IPC.BACKLOG_LIST_TASKS, projects);
+  backlogListTasks(projects, includeArchived) {
+    return ipcRenderer.invoke(IPC.BACKLOG_LIST_TASKS, projects, includeArchived);
   },
   backlogGetTask(projectPath, sub, file) {
     return ipcRenderer.invoke(IPC.BACKLOG_GET_TASK, projectPath, sub, file);
@@ -484,6 +485,9 @@ const terminalAPI: TerminalAPI = {
   },
   backlogArchiveTask(projectPath, taskId) {
     return ipcRenderer.invoke(IPC.BACKLOG_ARCHIVE_TASK, projectPath, taskId);
+  },
+  backlogDeleteTask(projectPath, taskId) {
+    return ipcRenderer.invoke(IPC.BACKLOG_DELETE_TASK, projectPath, taskId);
   },
   backlogValidateProject(projectPath) {
     return ipcRenderer.invoke(IPC.BACKLOG_VALIDATE_PROJECT, projectPath);

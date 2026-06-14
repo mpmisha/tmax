@@ -2,12 +2,84 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { useTerminalStore } from '../state/terminal-store';
+import { useTerminalStore, findSessionById } from '../state/terminal-store';
 import { confirmDialog } from './AppDialog';
 import type { BacklogTask } from '../../shared/backlog-types';
 import '../styles/backlog-board.css';
 
 type Project = { name: string; path: string; color?: string };
+
+// ── Header icons ─────────────────────────────────────────────────────
+// Inline Feather-style SVGs (monochrome, currentColor) so the header reads as
+// a crisp icon set rather than a mix of font glyphs that render inconsistently
+// across platforms.
+const svgBase = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+};
+const IconRefresh = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <polyline points="23 4 23 10 17 10" />
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+  </svg>
+);
+const IconArchive = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <rect x="3" y="4" width="18" height="4" rx="1" />
+    <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+    <path d="M10 12h4" />
+  </svg>
+);
+const IconArrowLeft = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <line x1="19" y1="12" x2="5" y2="12" />
+    <polyline points="12 19 5 12 12 5" />
+  </svg>
+);
+const IconArrowRight = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <line x1="5" y1="12" x2="19" y2="12" />
+    <polyline points="12 5 19 12 12 19" />
+  </svg>
+);
+// Double chevrons - used for "collapse to edge" so it reads distinctly from the
+// single-arrow "move to other side".
+const IconChevronsLeft = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <polyline points="11 17 6 12 11 7" />
+    <polyline points="18 17 13 12 18 7" />
+  </svg>
+);
+const IconChevronsRight = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <polyline points="13 17 18 12 13 7" />
+    <polyline points="6 17 11 12 6 7" />
+  </svg>
+);
+const IconExpand = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+const IconSidebar = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <line x1="9" y1="3" x2="9" y2="21" />
+  </svg>
+);
+const IconClose = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} {...svgBase}>
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
 
 // Canonical column order; any other status found in tasks is appended.
 const BASE_COLUMNS = ['To Do', 'In Progress', 'Done'];
@@ -49,6 +121,28 @@ function extractDescription(body: string): string {
   return h ? h[2].trim() : '';
 }
 
+// Turn lines that are a *bare* image path (e.g. a pasted screenshot path like
+// `C:\Users\me\clipboard-x.png` or `backlog/attachments/foo.png`) into markdown
+// image syntax so `marked` produces an <img> the resolver can hydrate. Lines
+// that already contain markdown image/link syntax are left untouched. This runs
+// before `marked`; DOMPurify still sanitizes the result.
+function wrapBareImagePaths(md: string): string {
+  return md
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+      // Skip lines that already have markdown image/link/HTML syntax.
+      if (/!\[|\]\(|<img|https?:|data:/i.test(trimmed)) return line;
+      // A bare path: optional drive letter, then path chars, ending in an image
+      // extension. Allow surrounding angle-bracket/quote wrappers.
+      const m = trimmed.match(/^[<"']?((?:[A-Za-z]:)?[^<>"'|?*\n]+?\.(?:png|jpe?g|gif|webp|bmp|svg))[>"']?$/i);
+      if (!m) return line;
+      return `![image](${m[1]})`;
+    })
+    .join('\n');
+}
+
 function relativeTime(ms: number): string {
   if (!ms) return '';
   const diff = Date.now() - ms;
@@ -66,11 +160,12 @@ function relativeTime(ms: number): string {
 }
 
 const api = () => (window as any).terminalAPI as {
-  backlogListTasks: (p: Project[]) => Promise<BacklogTask[]>;
+  backlogListTasks: (p: Project[], includeArchived?: boolean) => Promise<BacklogTask[]>;
   backlogGetTask: (path: string, sub: string, file: string) => Promise<{ frontmatter: Record<string, unknown>; body: string } | null>;
   backlogEditTask: (p: { projectPath: string; taskId: string; status?: string; title?: string; description?: string; checkAc?: number[]; uncheckAc?: number[] }) => Promise<{ ok: boolean; error?: string }>;
   backlogCreateTask: (p: { projectPath: string; title: string; status?: string; description?: string; labels?: string[] }) => Promise<{ ok: boolean; id?: string; error?: string }>;
   backlogArchiveTask: (path: string, taskId: string) => Promise<{ ok: boolean; error?: string }>;
+  backlogDeleteTask: (path: string, taskId: string) => Promise<{ ok: boolean; error?: string }>;
   backlogValidateProject: (path: string) => Promise<{ ok: boolean }>;
   backlogInitProject: (path: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   backlogPickFolder: (defaultPath?: string) => Promise<string | null>;
@@ -90,6 +185,9 @@ const BacklogBoard: React.FC = () => {
   const show = useTerminalStore((s) => s.showBacklog);
   const config = useTerminalStore((s) => s.config);
   const updateConfig = useTerminalStore((s) => s.updateConfig);
+  // When the Prompt Editor is layered on top of the board, it owns Esc - the
+  // board must not close out from under it.
+  const promptEditorOpen = useTerminalStore((s) => s.promptComposerRequest != null);
 
   const projects: Project[] = useMemo(
     () => (config?.backlogProjects as Project[] | undefined) ?? [],
@@ -101,6 +199,12 @@ const BacklogBoard: React.FC = () => {
   const [query, setQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState<string | null>(null); // project.path or null = all
   const [selected, setSelected] = useState<BacklogTask | null>(null);
+  // Key of a freshly-created task whose detail should open straight into title
+  // edit mode (so "+ Add task" lands the caret in the title field).
+  const [autoEditTitleKey, setAutoEditTitleKey] = useState<string | null>(null);
+  // Pending new-task draft: "+ Add task" opens this dialog; the task is only
+  // written to disk when the user hits Save (never on Cancel/close).
+  const [newTask, setNewTask] = useState<{ projectPath: string; status: string } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; task: BacklogTask } | null>(null);
   // Multi-select: set of "projectPath::id" keys. Opening a task's detail does
@@ -120,8 +224,14 @@ const BacklogBoard: React.FC = () => {
   const panelSide: 'left' | 'right' =
     (config?.backlogPanelSide as 'left' | 'right' | undefined) ?? 'left';
   const [panelWidth, setPanelWidth] = useState<number>(config?.backlogPanelWidth ?? 640);
+  // Collapse the whole docked panel to a thin edge strip (persisted).
+  const panelCollapsed = !!config?.backlogPanelCollapsed;
+  const setPanelCollapsed = (v: boolean) => updateConfig({ backlogPanelCollapsed: v });
   const [sidebarWidth, setSidebarWidth] = useState<number>(220);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Show archived tasks (scans backlog/archive/tasks). Off by default so the
+  // board stays focused on active work; toggled from the header.
+  const [showArchived, setShowArchived] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!projects.length) {
@@ -130,12 +240,12 @@ const BacklogBoard: React.FC = () => {
     }
     setLoading(true);
     try {
-      const list = await api().backlogListTasks(projects);
+      const list = await api().backlogListTasks(projects, showArchived);
       setTasks(Array.isArray(list) ? list : []);
     } finally {
       setLoading(false);
     }
-  }, [projects]);
+  }, [projects, showArchived]);
 
   // Refresh on open, and whenever the window regains focus while open.
   useEffect(() => {
@@ -174,6 +284,7 @@ const BacklogBoard: React.FC = () => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (menu) return; // the context menu handles its own Escape
+        if (promptEditorOpen) return; // the Prompt Editor, layered on top, owns Esc
         e.stopPropagation();
         if (selected) setSelected(null);
         else useTerminalStore.getState().closeBacklog();
@@ -181,7 +292,7 @@ const BacklogBoard: React.FC = () => {
     };
     document.addEventListener('keydown', handleKey, true);
     return () => document.removeEventListener('keydown', handleKey, true);
-  }, [show, selected, menu]);
+  }, [show, selected, menu, promptEditorOpen]);
 
   if (!show) return null;
 
@@ -201,8 +312,10 @@ const BacklogBoard: React.FC = () => {
   });
 
   // Columns = base order + any extra statuses present, in first-seen order.
+  // "Archived" is always pinned to the far right when present.
   const statuses: string[] = [...BASE_COLUMNS];
-  for (const t of visible) if (!statuses.includes(t.status)) statuses.push(t.status);
+  for (const t of visible) if (t.status !== 'Archived' && !statuses.includes(t.status)) statuses.push(t.status);
+  if (visible.some((t) => t.status === 'Archived')) statuses.push('Archived');
 
   const byStatus = (status: string) =>
     visible
@@ -244,6 +357,10 @@ const BacklogBoard: React.FC = () => {
   // ── Status change (shared by drag + context menu) ─────────────────
   const changeStatus = async (task: BacklogTask, status: string) => {
     if (task.status === status) return;
+    // Dropping a task on the synthetic "Archived" column means archive it for
+    // real (move to backlog/archive/tasks) - not just write status: Archived,
+    // which would leave the file in tasks/ and show it as Archived forever.
+    if (status === 'Archived') { void archiveTask(task); return; }
     setTasks((prev) =>
       prev.map((t) => (t === task ? { ...t, status, mtime: Date.now() } : t)),
     );
@@ -267,6 +384,28 @@ const BacklogBoard: React.FC = () => {
   const archiveTask = async (task: BacklogTask) => {
     const r = await api().backlogArchiveTask(task.project.path, task.id);
     if (!r.ok) useTerminalStore.getState().addToast(`Backlog: ${r.error || 'archive failed'}`);
+    if (selected === task) setSelected(null);
+    void refresh();
+  };
+
+  // Permanent delete (to the OS Recycle Bin / Trash), distinct from archive.
+  // Always confirms first since it removes the task from the backlog entirely.
+  const deleteTask = async (task: BacklogTask) => {
+    const ok = await confirmDialog({
+      title: 'Delete task?',
+      message: `Delete "${task.title}" (${task.id})? It's moved to the Recycle Bin, not the backlog archive.`,
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await api().backlogDeleteTask(task.project.path, task.id);
+      if (!r?.ok) useTerminalStore.getState().addToast(`Backlog: ${r?.error || 'delete failed'}`);
+    } catch {
+      // backlogDeleteTask missing usually means a stale preload/main (dev HMR
+      // doesn't reload them) - tell the user to restart rather than no-op.
+      useTerminalStore.getState().addToast('Backlog: delete unavailable - fully restart tmax to load the new build');
+    }
     if (selected === task) setSelected(null);
     void refresh();
   };
@@ -302,6 +441,20 @@ const BacklogBoard: React.FC = () => {
     setChecked(new Set());
     void refresh();
   };
+  const deleteChecked = async () => {
+    const sel = checkedTasks();
+    if (!sel.length) return;
+    const ok = await confirmDialog({
+      title: 'Delete selected?',
+      message: `Delete ${sel.length} selected task${sel.length === 1 ? '' : 's'}? They're moved to the Recycle Bin, not the backlog archive.`,
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    for (const t of sel) await api().backlogDeleteTask(t.project.path, t.id);
+    setChecked(new Set());
+    void refresh();
+  };
   const setStatusChecked = async (status: string) => {
     const sel = checkedTasks();
     for (const t of sel) if (t.status !== status) await api().backlogEditTask({ projectPath: t.project.path, taskId: t.id, status });
@@ -309,9 +462,10 @@ const BacklogBoard: React.FC = () => {
     void refresh();
   };
 
-  // Create a task with an optimistic placeholder card so it appears instantly,
-  // since the backlog CLI write + re-scan takes a second or two.
-  const createTaskOptimistic = async (projectPath: string, status: string, title: string) => {
+  // Commit a brand-new task from the New Task dialog (only called on Save, so
+  // nothing is written to disk until the user confirms). Uses an optimistic
+  // placeholder card so it appears instantly while the write + re-scan run.
+  const commitNewTask = async (projectPath: string, status: string, title: string, description: string) => {
     const proj = projects.find((p) => p.path === projectPath);
     const tempId = `__pending-${title}-${status}`;
     const placeholder: BacklogTask = {
@@ -327,18 +481,14 @@ const BacklogBoard: React.FC = () => {
       pending: true,
     } as BacklogTask & { pending?: boolean };
     setTasks((prev) => [...prev, placeholder]);
-    const r = await api().backlogCreateTask({ projectPath, title, status });
+    const r = await api().backlogCreateTask({ projectPath, title, status, description });
     if (!r.ok) {
       useTerminalStore.getState().addToast(`Backlog: ${r.error || 'create failed'}`);
       setTasks((prev) => prev.filter((t) => t.file !== tempId)); // drop placeholder on failure
       return;
     }
-    // Re-scan, then open the new task's detail so the user can add a
-    // description / acceptance criteria right after creating it.
-    const list = await api().backlogListTasks(projects);
+    const list = await api().backlogListTasks(projects, showArchived);
     setTasks(Array.isArray(list) ? list : []);
-    const created = r.id ? list.find((t) => t.id === r.id && t.project.path === projectPath) : undefined;
-    if (created) setSelected(created);
   };
 
   const setMode = (m: 'overlay' | 'panel') => updateConfig({ backlogDisplayMode: m });
@@ -363,27 +513,49 @@ const BacklogBoard: React.FC = () => {
             </button>
           )}
         </div>
-        <button className="backlog-refresh" onClick={() => void refresh()} title="Refresh">
-          {loading ? '...' : '↻'}
+        <button className={`backlog-refresh${loading ? ' spinning' : ''}`} onClick={() => void refresh()} title="Refresh" aria-label="Refresh">
+          <IconRefresh />
+        </button>
+        <button
+          className={`backlog-refresh${showArchived ? ' active' : ''}${loading ? ' busy' : ''}`}
+          onClick={() => setShowArchived((v) => !v)}
+          disabled={loading}
+          title={showArchived ? 'Hide archived tasks' : 'Show archived tasks'}
+          aria-label="Toggle archived tasks"
+          aria-busy={loading}
+        >
+          <IconArchive />
         </button>
         {displayMode === 'panel' && (
           <button
             className="backlog-refresh"
             onClick={toggleSide}
             title={panelSide === 'right' ? 'Move panel to the left' : 'Move panel to the right'}
+            aria-label="Move panel to the other side"
           >
-            {panelSide === 'right' ? '⇤' : '⇥'}
+            {panelSide === 'right' ? <IconArrowLeft /> : <IconArrowRight />}
+          </button>
+        )}
+        {displayMode === 'panel' && (
+          <button
+            className="backlog-refresh"
+            onClick={() => setPanelCollapsed(true)}
+            title="Collapse panel to the edge"
+            aria-label="Collapse panel"
+          >
+            {panelSide === 'right' ? <IconChevronsRight /> : <IconChevronsLeft />}
           </button>
         )}
         <button
           className="backlog-refresh"
           onClick={() => setMode(displayMode === 'panel' ? 'overlay' : 'panel')}
           title={displayMode === 'panel' ? 'Expand to full window' : 'Dock as side panel'}
+          aria-label={displayMode === 'panel' ? 'Expand to full window' : 'Dock as side panel'}
         >
-          {displayMode === 'panel' ? '⤢' : '⇥'}
+          {displayMode === 'panel' ? <IconExpand /> : <IconSidebar />}
         </button>
-        <button className="shortcuts-close" onClick={close} title="Close (Esc)">
-          &#10005;
+        <button className="shortcuts-close" onClick={close} title="Close (Esc)" aria-label="Close">
+          <IconClose />
         </button>
       </div>
 
@@ -393,6 +565,7 @@ const BacklogBoard: React.FC = () => {
           <span style={{ flex: 1 }} />
           <button className="backlog-selection-btn" onClick={() => void setStatusChecked('Done')}>Mark Done</button>
           <button className="backlog-selection-btn danger" onClick={() => void archiveChecked()}>Archive</button>
+          <button className="backlog-selection-btn danger" onClick={() => void deleteChecked()}>Delete</button>
           <button className="backlog-selection-btn" onClick={() => setChecked(new Set())}>Clear</button>
         </div>
       )}
@@ -438,11 +611,12 @@ const BacklogBoard: React.FC = () => {
                 status={status}
                 tasks={byStatus(status)}
                 singleProject={projectFilter}
+                projects={projects}
                 colorFor={colorFor}
                 onCardOpen={setSelected}
                 onDragStart={setDragId}
                 onDrop={() => onDropTo(status)}
-                onCreate={createTaskOptimistic}
+                onCreate={(projectPath, status) => setNewTask({ projectPath, status })}
                 onArchiveAll={() => void archiveAllInColumn(status)}
                 checked={checked}
                 onToggleCheck={toggleChecked}
@@ -460,12 +634,27 @@ const BacklogBoard: React.FC = () => {
 
   const overlays = (
     <>
+      {newTask && (
+        <NewTaskDialog
+          projectPath={newTask.projectPath}
+          projectName={projects.find((p) => p.path === newTask.projectPath)?.name ?? newTask.projectPath}
+          status={newTask.status}
+          onCancel={() => setNewTask(null)}
+          onSave={async (title, description) => {
+            const { projectPath, status } = newTask;
+            setNewTask(null);
+            await commitNewTask(projectPath, status, title, description);
+          }}
+        />
+      )}
       {selected && (
         <TaskDetail
           task={selected}
           colorFor={colorFor}
-          onClose={() => setSelected(null)}
+          startEditingTitle={autoEditTitleKey === `${selected.project.path}::${selected.id}`}
+          onClose={() => { setAutoEditTitleKey(null); setSelected(null); }}
           onArchive={archiveTask}
+          onDelete={deleteTask}
           onChanged={() => void refresh()}
         />
       )}
@@ -490,12 +679,34 @@ const BacklogBoard: React.FC = () => {
             else void archiveTask(t);
             setMenu(null);
           }}
+          onDelete={(t) => {
+            if (checked.has(taskKey(t)) && checked.size > 0) void deleteChecked();
+            else void deleteTask(t);
+            setMenu(null);
+          }}
         />
       )}
     </>
   );
 
   if (displayMode === 'panel') {
+    if (panelCollapsed) {
+      // Thin edge strip with a vertical label; click anywhere on it to expand.
+      return (
+        <div
+          className={`backlog-panel-collapsed side-${panelSide}`}
+          onClick={() => setPanelCollapsed(false)}
+          title="Expand Backlog panel"
+          role="button"
+          aria-label="Expand Backlog panel"
+        >
+          <span className="backlog-collapsed-icon">
+            {panelSide === 'right' ? <IconChevronsLeft /> : <IconChevronsRight />}
+          </span>
+          <span className="backlog-collapsed-label">Backlog</span>
+        </div>
+      );
+    }
     return (
       <div className={`backlog-panel side-${panelSide}`} style={{ width: panelWidth }}>
         {inner}
@@ -605,7 +816,8 @@ const CardContextMenu: React.FC<{
   onOpen: (t: BacklogTask) => void;
   onStatus: (t: BacklogTask, status: string) => void;
   onArchive: (t: BacklogTask) => void;
-}> = ({ x, y, task, statuses, selectionCount, onClose, onOpen, onStatus, onArchive }) => {
+  onDelete: (t: BacklogTask) => void;
+}> = ({ x, y, task, statuses, selectionCount, onClose, onOpen, onStatus, onArchive, onDelete }) => {
   const multi = selectionCount > 1;
   const suffix = multi ? ` (${selectionCount})` : '';
   const ref = useRef<HTMLDivElement>(null);
@@ -674,6 +886,7 @@ const CardContextMenu: React.FC<{
       <button className="context-menu-item" onClick={reveal}>Reveal task file</button>
       <div className="context-menu-separator" />
       <button className="context-menu-item danger" onClick={() => onArchive(task)}>Archive{suffix}</button>
+      <button className="context-menu-item danger" onClick={() => onDelete(task)}>Delete{suffix}</button>
     </div>,
     document.body,
   );
@@ -1013,27 +1226,24 @@ const Column: React.FC<{
   status: string;
   tasks: BacklogTask[];
   singleProject: string | null;
+  projects: Project[];
   colorFor: (ref: { name: string; path: string }) => string;
   onCardOpen: (t: BacklogTask) => void;
   onDragStart: (id: string) => void;
   onDrop: () => void;
-  onCreate: (projectPath: string, status: string, title: string) => void;
+  onCreate: (projectPath: string, status: string, title?: string) => void;
   onArchiveAll: () => void;
   checked: Set<string>;
   onToggleCheck: (t: BacklogTask) => void;
   onCardContext: (e: React.MouseEvent, t: BacklogTask) => void;
-}> = ({ status, tasks, singleProject, colorFor, onCardOpen, onDragStart, onDrop, onCreate, onArchiveAll, checked, onToggleCheck, onCardContext }) => {
+}> = ({ status, tasks, singleProject, projects, colorFor, onCardOpen, onDragStart, onDrop, onCreate, onArchiveAll, checked, onToggleCheck, onCardContext }) => {
   const [over, setOver] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [title, setTitle] = useState('');
-
-  const create = () => {
-    const t = title.trim();
-    if (!t || !singleProject) return;
-    setCreating(false);
-    setTitle('');
-    onCreate(singleProject, status, t);
-  };
+  const [picking, setPicking] = useState(false);
+  // Resolve which project a new task lands in: the active filter, or the only
+  // project if there's just one. When several projects are shown together and
+  // no filter is set, the target is ambiguous, so we offer a quick picker
+  // instead of hiding "+ Add task" (which left new users with no add option).
+  const addTarget = singleProject ?? (projects.length === 1 ? projects[0].path : null);
 
   return (
     <div
@@ -1074,25 +1284,33 @@ const Column: React.FC<{
           />
         ))}
       </div>
-      {singleProject && (
-        creating ? (
-          <div className="backlog-create">
-            <input
-              placeholder="New task title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') create();
-                if (e.key === 'Escape') { setCreating(false); setTitle(''); }
-              }}
-              autoFocus
-            />
-          </div>
-        ) : (
-          <button className="backlog-col-add" onClick={() => setCreating(true)}>
+      {projects.length > 0 && (
+        <div className="backlog-col-addwrap">
+          <button
+            className="backlog-col-add"
+            onClick={() => {
+              if (addTarget) onCreate(addTarget, status);
+              else setPicking((v) => !v);
+            }}
+          >
             + Add task
           </button>
-        )
+          {!addTarget && picking && (
+            <div className="backlog-col-pick">
+              <div className="backlog-col-pick-h">Add to project</div>
+              {projects.map((p) => (
+                <button
+                  key={p.path}
+                  className="backlog-col-pick-item"
+                  onClick={() => { setPicking(false); onCreate(p.path, status); }}
+                >
+                  <span className="backlog-proj-dot" style={{ background: colorFor(p) }} />
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1159,16 +1377,163 @@ interface AcItem {
   text: string;
 }
 
+// Live tail of an attached AI agent's transcript, shown inside a task detail
+// (TASK-223). Polls the session timeline and renders the most recent messages.
+const AgentOutputPanel: React.FC<{
+  sessionId: string;
+  provider: 'copilot' | 'claude-code';
+}> = ({ sessionId, provider }) => {
+  const [msgs, setMsgs] = useState<{ role: string; text: string; time: number }[] | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOnce = () => {
+      const getTimeline = (window as any).terminalAPI?.getSessionTimeline;
+      if (!getTimeline) return;
+      getTimeline(provider, sessionId)
+        .then((rows: { role: string; text: string; time: number }[]) => {
+          if (cancelled) return;
+          const next = Array.isArray(rows) ? rows.slice(-12) : [];
+          setMsgs(next);
+        })
+        .catch(() => { if (!cancelled) setMsgs([]); });
+    };
+    fetchOnce();
+    const t = setInterval(fetchOnce, 2000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [sessionId, provider]);
+
+  // Keep the tail scrolled to the latest message.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [msgs]);
+
+  return (
+    <div className="backlog-agent-output" ref={bodyRef}>
+      {msgs === null && <div className="backlog-agent-empty">Loading agent output…</div>}
+      {msgs !== null && msgs.length === 0 && (
+        <div className="backlog-agent-empty">No output yet from this agent.</div>
+      )}
+      {msgs?.map((m, i) => (
+        <div key={i} className={`backlog-agent-msg ${m.role}`}>
+          <span className="backlog-agent-role">{m.role === 'assistant' ? (provider === 'copilot' ? 'Copilot' : 'Claude Code') : 'You'}</span>
+          <span className="backlog-agent-text">{m.text.length > 600 ? m.text.slice(0, 600) + '…' : m.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// New-task draft dialog. Nothing is written to disk until Save - Cancel/Esc
+// discards. Title is required; description is optional and supports image paste.
+const NewTaskDialog: React.FC<{
+  projectPath: string;
+  projectName: string;
+  status: string;
+  onCancel: () => void;
+  onSave: (title: string, description: string) => void | Promise<void>;
+}> = ({ projectPath, projectName, status, onCancel, onSave }) => {
+  const [title, setTitle] = useState('');
+  const [desc, setDesc] = useState('');
+  const [saving, setSaving] = useState(false);
+  const descRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+
+  const save = async () => {
+    const t = title.trim();
+    if (!t || saving) return;
+    setSaving(true);
+    await onSave(t, desc);
+  };
+
+  // Paste an image into the description: save it into the project and insert
+  // the returned relative path at the caret (mirrors the task-detail behavior).
+  const onDescPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!api().clipboardHasImage()) return; // let normal text paste through
+    e.preventDefault();
+    const r = await api().backlogSaveImage(projectPath);
+    if (r.ok && r.relPath) {
+      const el = descRef.current;
+      const md = `![image](${r.relPath})`;
+      if (el) {
+        const s = el.selectionStart; const en = el.selectionEnd;
+        setDesc((d) => d.slice(0, s) + md + d.slice(en));
+      } else {
+        setDesc((d) => d + md);
+      }
+    } else if (r.error) {
+      useTerminalStore.getState().addToast(`Backlog: ${r.error}`);
+    }
+  };
+
+  return (
+    <div className="backlog-detail-backdrop" onMouseDown={onCancel}>
+      <div className="backlog-detail" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="backlog-detail-header">
+          <span className="backlog-detail-id">New task</span>
+          <span className="backlog-detail-status">{status} · {projectName}</span>
+          <button className="shortcuts-close" onClick={onCancel} title="Cancel (Esc)" aria-label="Cancel">
+            <IconClose />
+          </button>
+        </div>
+
+        <input
+          className="backlog-detail-title-edit"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Task title (required)"
+          autoFocus
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void save(); } }}
+        />
+
+        <div className="backlog-detail-desc">
+          <div className="backlog-detail-section-h">Description</div>
+          <textarea
+            ref={descRef}
+            className="backlog-detail-desc-edit"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            onPaste={(e) => void onDescPaste(e)}
+            placeholder="Describe the task (optional). Paste an image to attach it. Ctrl+Enter to save."
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void save(); } }}
+          />
+        </div>
+
+        <div className="backlog-detail-footer">
+          <span style={{ flex: 1 }} />
+          <button className="backlog-detail-close" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+          <button className="backlog-detail-archive" onClick={() => void save()} disabled={!title.trim() || saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TaskDetail: React.FC<{
   task: BacklogTask;
   colorFor: (ref: { name: string; path: string }) => string;
+  startEditingTitle?: boolean;
   onClose: () => void;
   onArchive: (t: BacklogTask) => void;
+  onDelete: (t: BacklogTask) => void;
   onChanged: () => void;
-}> = ({ task, colorFor, onClose, onArchive, onChanged }) => {
+}> = ({ task, colorFor, startEditingTitle, onClose, onArchive, onDelete, onChanged }) => {
   const [body, setBody] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(!!startEditingTitle);
   const [title, setTitle] = useState(task.title);
   const [busy, setBusy] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
@@ -1181,6 +1546,32 @@ const TaskDetail: React.FC<{
   const descTextareaRef = useRef<HTMLTextAreaElement>(null);
   const descViewRef = useRef<HTMLDivElement>(null);
   const bodyViewRef = useRef<HTMLDivElement>(null);
+  const [showAgentOutput, setShowAgentOutput] = useState(true);
+
+  // Attached agent session for this task (TASK-223). Persisted in config so the
+  // link survives reopening the board.
+  const taskAgentKey = `${task.project.path}::${task.id}`;
+  const attachedAgent = useTerminalStore(
+    (s) => (s.config?.backlogTaskAgents as Record<string, { sessionId: string; provider: 'copilot' | 'claude-code' }> | undefined)?.[taskAgentKey],
+  );
+  const attachFocusedAgent = () => {
+    const s = useTerminalStore.getState();
+    const fid = s.focusedTerminalId;
+    const sid = fid ? s.terminals.get(fid)?.aiSessionId : undefined;
+    if (!sid) { s.addToast('Focus an AI pane (Claude Code / Copilot) first'); return; }
+    const sess = findSessionById(s.copilotSessions, s.claudeCodeSessions, sid);
+    const provider: 'copilot' | 'claude-code' = sess?.provider === 'claude-code' ? 'claude-code' : 'copilot';
+    const map = { ...((s.config?.backlogTaskAgents as Record<string, { sessionId: string; provider: 'copilot' | 'claude-code' }>) ?? {}) };
+    map[taskAgentKey] = { sessionId: sid, provider };
+    s.updateConfig({ backlogTaskAgents: map });
+    setShowAgentOutput(true);
+  };
+  const detachAgent = () => {
+    const s = useTerminalStore.getState();
+    const map = { ...((s.config?.backlogTaskAgents as Record<string, { sessionId: string; provider: 'copilot' | 'claude-code' }>) ?? {}) };
+    delete map[taskAgentKey];
+    s.updateConfig({ backlogTaskAgents: map });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1301,10 +1692,17 @@ const TaskDetail: React.FC<{
   // to data URIs - the renderer can't load local files directly. Runs after
   // the markdown renders.
   useEffect(() => {
-    const base = `${task.project.path.replace(/\\/g, '/')}/backlog/${task.sub}`;
-    const resolve = (rel: string) => {
+    const projectRoot = task.project.path.replace(/\\/g, '/').replace(/\/+$/, '');
+    const base = `${projectRoot}/backlog/${task.sub}`;
+    // Absolute path detection: Unix (/foo), Windows drive (C:\ or C:/), or UNC
+    // (\\server or //server). Everything else is treated as relative.
+    const isAbsolute = (p: string) => /^([A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(p);
+    const resolve = (raw: string) => {
+      // Normalize backslashes so file paths work cross-platform.
+      const norm = raw.replace(/\\/g, '/');
+      if (isAbsolute(norm)) return norm;
       const parts = base.split('/').filter(Boolean);
-      for (const seg of rel.split('/')) {
+      for (const seg of norm.split('/')) {
         if (seg === '..') parts.pop();
         else if (seg !== '.' && seg !== '') parts.push(seg);
       }
@@ -1315,10 +1713,18 @@ const TaskDetail: React.FC<{
       root.querySelectorAll('img').forEach((img) => {
         const src = img.getAttribute('src') || '';
         if (/^(https?:|data:)/i.test(src) || !src) return;
-        void api().imageReadAsDataUrl(resolve(src)).then((url) => { if (url) img.setAttribute('src', url); });
+        let decoded = src;
+        try { decoded = decodeURI(src); } catch { /* keep raw on malformed URI */ }
+        void api().imageReadAsDataUrl(resolve(decoded)).then((url) => {
+          if (url) { img.setAttribute('src', url); return; }
+          // The path doesn't resolve to a real file - e.g. an example/placeholder
+          // path mentioned in prose. Show it as plain text instead of a broken
+          // image icon.
+          try { img.replaceWith(document.createTextNode(decoded)); } catch { /* node already gone */ }
+        });
       });
     }
-  }, [descValue, editingDesc, loading, task.project.path, task.sub]);
+  }, [descValue, body, editingDesc, loading, task.project.path, task.sub]);
 
   // Clean the raw body for display: drop Backlog.md's HTML section/AC markers,
   // the Description (shown as its own editable field above), and (when we have
@@ -1333,7 +1739,7 @@ const TaskDetail: React.FC<{
   }, [body, acItems.length]);
 
   const bodyHtml = useMemo(
-    () => DOMPurify.sanitize(marked(bodyText, { breaks: true, gfm: true }) as string),
+    () => DOMPurify.sanitize(marked(wrapBareImagePaths(bodyText), { breaks: true, gfm: true }) as string),
     [bodyText],
   );
 
@@ -1346,11 +1752,13 @@ const TaskDetail: React.FC<{
           <button className="shortcuts-close" onClick={onClose} title="Close (Esc)">&#10005;</button>
         </div>
 
+        <div className="backlog-detail-scroll">
         {editingTitle ? (
           <input
             className="backlog-detail-title-edit"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onFocus={(e) => { if (startEditingTitle) e.currentTarget.select(); }}
             onBlur={() => void saveTitle()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void saveTitle();
@@ -1396,7 +1804,7 @@ const TaskDetail: React.FC<{
                 className="md-rendered-content backlog-detail-md backlog-detail-desc-view"
                 title="Click to edit"
                 onClick={() => { setDescDraft(descValue); setEditingDesc(true); }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(descValue, { breaks: true, gfm: true }) as string) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked(wrapBareImagePaths(descValue), { breaks: true, gfm: true }) as string) }}
               />
             ) : (
               <div
@@ -1438,6 +1846,31 @@ const TaskDetail: React.FC<{
           ) : null}
         </div>
 
+        <div className="backlog-detail-agent">
+          <div className="backlog-detail-agent-bar">
+            <span className="backlog-detail-section-h">Agent</span>
+            {attachedAgent ? (
+              <>
+                <span className="backlog-agent-chip">
+                  {attachedAgent.provider === 'copilot' ? 'Copilot' : 'Claude Code'}
+                </span>
+                <button className="backlog-agent-link" onClick={() => setShowAgentOutput((v) => !v)}>
+                  {showAgentOutput ? 'Hide output' : 'Show output'}
+                </button>
+                <button className="backlog-agent-link" onClick={detachAgent}>Detach</button>
+              </>
+            ) : (
+              <button className="backlog-agent-link" onClick={attachFocusedAgent} title="Link this task to the focused AI pane to watch its output">
+                Attach to focused agent
+              </button>
+            )}
+          </div>
+          {attachedAgent && showAgentOutput && (
+            <AgentOutputPanel sessionId={attachedAgent.sessionId} provider={attachedAgent.provider} />
+          )}
+        </div>
+        </div>
+
         <div className="backlog-detail-footer">
           <button
             className="backlog-detail-archive"
@@ -1446,10 +1879,13 @@ const TaskDetail: React.FC<{
           >
             Reveal file
           </button>
-          <span style={{ flex: 1 }} />
           <button className="backlog-detail-archive" disabled={busy} onClick={() => onArchive(task)}>
             Archive
           </button>
+          <button className="backlog-detail-archive danger" disabled={busy} onClick={() => onDelete(task)}>
+            Delete
+          </button>
+          <span style={{ flex: 1 }} />
           <button className="backlog-detail-close" onClick={onClose}>
             Close
           </button>

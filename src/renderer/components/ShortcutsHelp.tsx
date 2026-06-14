@@ -1,8 +1,28 @@
 import React, { useEffect } from 'react';
-import { formatKeyForPlatform } from '../utils/platform';
+import { formatKeyForPlatform, isMac } from '../utils/platform';
+import { useTerminalStore } from '../state/terminal-store';
 
 interface ShortcutsHelpProps {
   onClose: () => void;
+}
+
+const DEFAULT_SHOW_WINDOW_HOTKEY = 'CommandOrControl+Shift+Space';
+
+// Render an Electron accelerator (e.g. "CommandOrControl+Shift+Space") for
+// display. The global show-window hotkey is stored in accelerator form, not
+// the renderer "Ctrl+Shift+X" form formatKeyForPlatform expects (TASK-197).
+function displayAccelerator(s: string): string {
+  if (!s) return 'Disabled';
+  const parts = s.split('+').map((p) => {
+    if (p === 'CommandOrControl' || p === 'CmdOrCtrl') return isMac ? '⌘' : 'Ctrl';
+    if (p === 'Command' || p === 'Cmd' || p === 'Meta' || p === 'Super') return isMac ? '⌘' : 'Win';
+    if (p === 'Control' || p === 'Ctrl') return 'Ctrl';
+    if (p === 'Alt' || p === 'Option') return isMac ? '⌥' : 'Alt';
+    if (p === 'Shift') return isMac ? '⇧' : 'Shift';
+    if (p === 'Return') return 'Enter';
+    return p;
+  });
+  return parts.join(isMac ? '' : '+');
 }
 
 const shortcuts = [
@@ -33,7 +53,7 @@ const shortcuts = [
   ]},
   { category: 'AI', items: [
     { key: 'Ctrl+Shift+K', action: 'Jump to prompt in terminal' },
-    { key: 'Ctrl+Alt+C', action: 'Open prompt editor' },
+    { key: 'Ctrl+Alt+E', action: 'Open prompt editor' },
     { key: 'Ctrl+Shift+C', action: 'AI Sessions panel' },
     { key: 'Ctrl+Alt+T', action: 'Toggle session transcript' },
   ]},
@@ -48,6 +68,15 @@ const shortcuts = [
 ];
 
 const ShortcutsHelp: React.FC<ShortcutsHelpProps> = ({ onClose }) => {
+  // TASK-197: surface the global (OS-level) show/hide-tmax hotkey so users can
+  // discover it. It's editable in Settings > Terminal > System; here it's
+  // documented read-only. Reads the configured accelerator (or the default).
+  const rawShowWindowHotkey = useTerminalStore(
+    (s) => (s.config as any)?.showWindowHotkey,
+  );
+  const showWindowHotkey =
+    rawShowWindowHotkey === undefined ? DEFAULT_SHOW_WINDOW_HOTKEY : rawShowWindowHotkey;
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -78,6 +107,17 @@ const ShortcutsHelp: React.FC<ShortcutsHelpProps> = ({ onClose }) => {
               ))}
             </div>
           ))}
+          {/* TASK-197: global OS-level hotkey, shown separately because it
+              works even when tmax isn't focused and is configured in Settings. */}
+          <div className="shortcuts-group">
+            <div className="shortcuts-category">Global (works anywhere)</div>
+            <div className="shortcuts-row">
+              <kbd className="shortcuts-key">{displayAccelerator(showWindowHotkey)}</kbd>
+              <span className="shortcuts-action">
+                Show / focus tmax from any app (change in Settings &rsaquo; Terminal &rsaquo; System)
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

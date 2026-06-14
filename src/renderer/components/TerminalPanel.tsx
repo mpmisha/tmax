@@ -32,6 +32,21 @@ function pickRandomPingPrompt(): string {
   return PING_PROMPTS[Math.floor(Math.random() * PING_PROMPTS.length)];
 }
 
+// Varied phrasings for the backlog-update ping so it doesn't read as a canned,
+// deterministic macro each time.
+const BACKLOG_PING_PROMPTS = [
+  "Take a moment to bring the Backlog.md tasks up to date: set the right status, tick off any acceptance criteria you've completed, and add a short final summary to anything you've finished.",
+  "Reconcile the Backlog.md board with where things actually stand - update statuses, check the criteria that are done, and write a brief summary on completed tasks.",
+  "Sync the Backlog.md tasks to reality: move tasks to their correct status, mark finished acceptance criteria, and drop a concise final summary on the ones that are done.",
+  "Could you refresh the Backlog.md tasks? Set statuses correctly, check completed criteria, and append a short wrap-up to each finished task.",
+  "Update the backlog to match the work so far - correct each task's status, check off completed acceptance criteria, and add a brief summary where a task is done.",
+  "Give the Backlog.md tasks a pass: fix statuses, tick completed criteria, and add a short final summary to anything you've wrapped up.",
+];
+
+function pickRandomBacklogPrompt(): string {
+  return BACKLOG_PING_PROMPTS[Math.floor(Math.random() * BACKLOG_PING_PROMPTS.length)];
+}
+
 // TASK-171: AI CLI process names we look for in a pane's descendant tree.
 // Matched on the cleaned name (no path, no .exe, lowercased). Direct name
 // for the canonical binaries plus the common wrapper shims users have
@@ -350,6 +365,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   const aiProcessGiveUpRef = useRef(false);
   // TASK-172: ping button double-fire guard. Cleared after 1.2 s.
   const pingInFlightRef = useRef(false);
+  // Independent double-fire guard for the backlog-update ping, so it and the
+  // status ping don't block each other.
+  const backlogPingInFlightRef = useRef(false);
   // Buffer the user's first typed command so we can use it as the pane title
   // when the shell's OSC title is just "cmd.exe" / "pwsh.exe" / "bash" -
   // those generic names tell you nothing about what's actually running here.
@@ -363,6 +381,18 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
   // TASK-52: read latest config in the copy handlers without rebuilding
   // the terminal. Updated by a small effect below.
   const smartUnwrapRef = useRef<boolean>(true);
+  // TASK-224: image-path link ranges, keyed by absolute buffer row, captured
+  // as the image-path link provider computes them on hover. A capture-phase
+  // mouseup handler uses these to activate the preview on a plain single click
+  // even when xterm's own hover-dependent link activation misfires (it does in
+  // AI CLI panes that redraw under a stationary cursor and have mouse tracking
+  // on, where a click is forwarded to the pty instead of the linkifier). The
+  // `lastActivateAt` timestamp dedupes against xterm's own activate() so a
+  // click that xterm DID handle doesn't open the preview twice.
+  const imgLinkHitsRef = useRef<{
+    rows: Map<number, Array<{ startX: number; endX: number; activate: () => void }>>;
+    lastActivateAt: number;
+  }>({ rows: new Map(), lastActivateAt: 0 });
   const isFocused = focusedTerminalId === terminalId;
   // TASK-72: pane is part of the user's multi-selection set (Ctrl/Cmd+click
   // on the title bar). Drives the .multi-selected accent border and is the
@@ -1003,6 +1033,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         const lineIdx0 = bufferLineNumber - 1;
         if (lineIdx0 < 0 || lineIdx0 >= buf.length) { callback(undefined); return; }
 
+        // TASK-224: this provider call recomputes the link state for this row,
+        // so drop any previously-recorded direct-click hits for it (the buffer
+        // row may have been reused for different content as scrollback shifts).
+        // Keep the map small by also evicting once it grows large.
+        imgLinkHitsRef.current.rows.delete(lineIdx0);
+        if (imgLinkHitsRef.current.rows.size > 200) imgLinkHitsRef.current.rows.clear();
+
         let softStart = lineIdx0;
         while (softStart > 0) {
           const cur = buf.getLine(softStart);
@@ -1112,43 +1149,67 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
           const startX = lineIdx0 === a.row ? a.col + 1 : 1;
           const endX = lineIdx0 === b.row ? b.col + 1 : cols;
           const matchedPath = match[0];
+          // Resolve + open the preview. Shared by xterm's link activate() and
+          // the direct single-click handler (TASK-224) so both paths behave
+          // identically. Marked guarded so a click xterm already handled and
+          // our own fallback don't both open the preview (see dedupe below).
+          const openPreview = () => {
+            // Dedupe: a single user click can reach here twice - once from our
+            // direct mouseup handler (capture phase, fires first) and once from
+            // xterm's own link activate() (bubble phase). Whichever fires first
+            // wins; the second within 400ms is dropped so we don't open twice.
+            const now = Date.now();
+            if (now - imgLinkHitsRef.current.lastActivateAt < 400) return;
+            imgLinkHitsRef.current.lastActivateAt = now;
+            const open = (fullPath: string) => {
+              const fileName = fullPath.split(/[/\\]/).pop() || fullPath;
+              useTerminalStore.setState({
+                markdownPreview: { filePath: fullPath, content: '', fileName, kind: 'image' },
+              });
+            };
+            const isAbsolute = /^[a-zA-Z]:/.test(matchedPath) || matchedPath.startsWith('/') || matchedPath.startsWith('~');
+            const isBareName = !matchedPath.includes('/') && !matchedPath.includes('\\');
+            const cwdRelative = (): string => {
+              const termInst = useTerminalStore.getState().terminals.get(terminalId);
+              const cwd = termInst?.cwd || '';
+              const sep = cwd.includes('\\') ? '\\' : '/';
+              return cwd + sep + matchedPath;
+            };
+            if (isAbsolute) { open(matchedPath); return; }
+            // Copilot CLI shows pasted clipboard images as `[basename.png]`
+            // (directory hidden). Probe tmax's clipboard dir for the file
+            // before falling back to cwd-relative resolution.
+            if (isBareName) {
+              const api = window.terminalAPI as unknown as { resolveClipboardImageBasename?: (b: string) => Promise<string | null> };
+              if (api.resolveClipboardImageBasename) {
+                api.resolveClipboardImageBasename(matchedPath)
+                  .then((resolved) => open(resolved || cwdRelative()))
+                  .catch(() => open(cwdRelative()));
+                return;
+              }
+            }
+            open(cwdRelative());
+          };
+
+          // Record this hit for the direct-click fallback, keyed by absolute
+          // buffer row (provideLinks' bufferLineNumber is 1-based over the
+          // whole buffer, matching what pixelToCell returns as `.row`).
+          const absRow = lineIdx0;
+          let rowHits = imgLinkHitsRef.current.rows.get(absRow);
+          if (!rowHits) { rowHits = []; imgLinkHitsRef.current.rows.set(absRow, rowHits); }
+          // Avoid unbounded growth: replace any prior hit with the same span.
+          if (!rowHits.some((h) => h.startX === startX && h.endX === endX)) {
+            rowHits.push({ startX, endX, activate: openPreview });
+          }
+
           links.push({
             range: {
               start: { x: startX, y: bufferLineNumber },
               end: { x: endX, y: bufferLineNumber },
             },
             text: matchedPath,
-            tooltip: `Ctrl+Click to preview: ${matchedPath}`,
-            activate() {
-              const open = (fullPath: string) => {
-                const fileName = fullPath.split(/[/\\]/).pop() || fullPath;
-                useTerminalStore.setState({
-                  markdownPreview: { filePath: fullPath, content: '', fileName, kind: 'image' },
-                });
-              };
-              const isAbsolute = /^[a-zA-Z]:/.test(matchedPath) || matchedPath.startsWith('/') || matchedPath.startsWith('~');
-              const isBareName = !matchedPath.includes('/') && !matchedPath.includes('\\');
-              const cwdRelative = (): string => {
-                const termInst = useTerminalStore.getState().terminals.get(terminalId);
-                const cwd = termInst?.cwd || '';
-                const sep = cwd.includes('\\') ? '\\' : '/';
-                return cwd + sep + matchedPath;
-              };
-              if (isAbsolute) { open(matchedPath); return; }
-              // Copilot CLI shows pasted clipboard images as `[basename.png]`
-              // (directory hidden). Probe tmax's clipboard dir for the file
-              // before falling back to cwd-relative resolution.
-              if (isBareName) {
-                const api = window.terminalAPI as unknown as { resolveClipboardImageBasename?: (b: string) => Promise<string | null> };
-                if (api.resolveClipboardImageBasename) {
-                  api.resolveClipboardImageBasename(matchedPath)
-                    .then((resolved) => open(resolved || cwdRelative()))
-                    .catch(() => open(cwdRelative()));
-                  return;
-                }
-              }
-              open(cwdRelative());
-            },
+            tooltip: `Click to preview: ${matchedPath}`,
+            activate() { openPreview(); },
           });
         }
         callback(links.length > 0 ? links : undefined);
@@ -2277,6 +2338,33 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
         const dx = e.clientX - dragStartPos.x;
         const dy = e.clientY - dragStartPos.y;
         const wasDrag = Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD;
+
+        // TASK-224: reliable single-click open for image-path links. xterm's
+        // own link activation is hover-state dependent and misfires in AI CLI
+        // panes (mouse tracking forwards the click to the pty; the linkifier's
+        // _currentLink can be stale when the pane redraws under a stationary
+        // cursor), so the user had to click several times. We instead activate
+        // directly from the link ranges the provider already computed. Only on
+        // a genuine click (no drag) with no modifier that means "select", and
+        // dedupe against xterm's own activate() which may have just fired for
+        // the same click.
+        if (!wasDrag && !e.shiftKey && imgLinkHitsRef.current.rows.size > 0) {
+          const cell = pixelToCell(e.clientX, e.clientY);
+          if (cell) {
+            // pixelToCell returns 0-based col; provider ranges are 1-based
+            // inclusive. Convert to compare.
+            const col1 = cell.col + 1;
+            const rowHits = imgLinkHitsRef.current.rows.get(cell.row);
+            const hit = rowHits?.find((h) => col1 >= h.startX && col1 <= h.endX);
+            if (hit) {
+              // openPreview() self-dedupes, so if xterm already activated this
+              // same click this call is a no-op. Otherwise it opens the preview.
+              hit.activate();
+              dragStartPos = null;
+              return;
+            }
+          }
+        }
         // Native xterm selections (drag, double/triple-click) are captured
         // via onSelectionChange below. The path that needs explicit mouseup
         // handling is a drag while a TUI has mouse reporting on - xterm
@@ -3343,7 +3431,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
             <button className="context-menu-item" onClick={() => {
               setPaneMenuPos(null);
               useTerminalStore.getState().openPromptComposer(terminalId);
-            }}>📝 Prompt Editor <span className="context-menu-shortcut">Ctrl+Alt+C</span></button>
+            }}>📝 Prompt Editor <span className="context-menu-shortcut">Ctrl+Alt+E</span></button>
             {aiSessionId && (
               <button className="context-menu-item" onClick={() => {
                 setPaneMenuPos(null);
@@ -3595,6 +3683,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
               title="Ping - ask the session where it's at, auto-sent"
               onClick={(e) => {
                 e.stopPropagation();
+                // Drop keyboard focus off this button and hand it back to the
+                // terminal synchronously, so the user's next Enter goes to the
+                // terminal input instead of re-activating this button (which
+                // would re-send the prompt). Must run before any setTimeout.
+                (e.currentTarget as HTMLButtonElement).blur();
+                useTerminalStore.getState().setFocus?.(terminalId);
+                getTerminalEntry(terminalId)?.terminal?.focus();
                 // TASK-172 guard: char-by-char path made things worse
                 // (Copilot dropped the text entirely). Reverting to
                 // bracketed-paste single-write that at least shows text
@@ -3625,6 +3720,50 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({ terminalId, floatTitleBar
                 useTerminalStore.getState().addToast('Status request sent');
               }}
             >🔔</button>
+          )}
+          {aiSessionId && (
+            <button
+              className="terminal-pane-latest-prompt-btn"
+              title="Update Backlog - ask this agent to update its task statuses, ACs, and summaries"
+              aria-label="Ask agent to update Backlog tasks"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Blur this button and return focus to the terminal so a
+                // following Enter submits in the terminal rather than re-firing
+                // this button (which would re-send the request). Synchronous,
+                // before any early return or setTimeout.
+                (e.currentTarget as HTMLButtonElement).blur();
+                useTerminalStore.getState().setFocus?.(terminalId);
+                getTerminalEntry(terminalId)?.terminal?.focus();
+                if (backlogPingInFlightRef.current) return;
+                // Don't ask the agent to update a backlog that doesn't exist:
+                // only send when this pane's cwd sits inside a project that's on
+                // the Backlog board. Otherwise the agent wastes a turn hunting
+                // for a backlog that isn't there.
+                const st = useTerminalStore.getState();
+                const cwd = (st.terminals.get(terminalId)?.cwd || '').replace(/\\/g, '/').toLowerCase();
+                const projects = (st.config?.backlogProjects as { path: string }[] | undefined) ?? [];
+                const inBacklogProject = !!cwd && projects.some((p) => {
+                  const pp = (p.path || '').replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+                  return pp && (cwd === pp || cwd.startsWith(pp + '/'));
+                });
+                if (!inBacklogProject) {
+                  st.addToast("This pane isn't in a Backlog project - add it to the Backlog board first");
+                  return;
+                }
+                backlogPingInFlightRef.current = true;
+                setTimeout(() => { backlogPingInFlightRef.current = false; }, 1200);
+                const prompt = pickRandomBacklogPrompt();
+                const isBracketed = cursorHideSignalsRef.current.bracketedPaste;
+                const payload = prepareClipboardPaste(prompt, isBracketed);
+                window.terminalAPI.writePty(terminalId, payload);
+                // Same dual Enter (\r then \n) as the status ping - xterm/Ink
+                // vary on which byte submits.
+                setTimeout(() => { window.terminalAPI.writePty(terminalId, '\r'); }, 500);
+                setTimeout(() => { window.terminalAPI.writePty(terminalId, '\n'); }, 600);
+                useTerminalStore.getState().addToast('Backlog update requested');
+              }}
+            >&#128203;</button>
           )}
           {aiSessionId && (
             <button

@@ -89,6 +89,7 @@ export const IPC = {
   BACKLOG_EDIT_TASK: 'backlog:editTask',
   BACKLOG_CREATE_TASK: 'backlog:createTask',
   BACKLOG_ARCHIVE_TASK: 'backlog:archiveTask',
+  BACKLOG_DELETE_TASK: 'backlog:deleteTask',
   BACKLOG_VALIDATE_PROJECT: 'backlog:validateProject',
   BACKLOG_INIT_PROJECT: 'backlog:initProject',
   BACKLOG_PICK_FOLDER: 'backlog:pickFolder',

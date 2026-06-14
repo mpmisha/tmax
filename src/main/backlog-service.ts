@@ -9,13 +9,13 @@
 // (block scalars used for quoted titles, block lists for assignee/labels) stays
 // identical.
 
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { IPC } from '../shared/ipc-channels';
 import type { BacklogProjectRef, BacklogTask, BacklogTaskDetail } from '../shared/backlog-types';
 // Write operations live in backlog-writer.ts (pure, CLI-free, testable).
-import { editTask, createTask, archiveTask, initProject } from './backlog-writer';
+import { editTask, createTask, archiveTask, initProject, locateTaskFileAnywhere } from './backlog-writer';
 import type { EditPayload, CreatePayload } from './backlog-writer';
 
 // ── Frontmatter parsing (ported from backlog-hub) ────────────────────
@@ -134,63 +134,89 @@ function asArray(v: unknown): string[] {
 
 const TASK_SUBDIRS = ['tasks', 'completed'] as const;
 
-function scanProject(project: BacklogProjectRef): BacklogTask[] {
+async function scanProject(
+  project: BacklogProjectRef,
+  includeArchived = false,
+): Promise<BacklogTask[]> {
   const tasks: BacklogTask[] = [];
-  for (const sub of TASK_SUBDIRS) {
+  const subs = includeArchived ? [...TASK_SUBDIRS, 'archive/tasks'] : [...TASK_SUBDIRS];
+  for (const sub of subs) {
     const dir = path.join(project.path, 'backlog', sub);
     let entries: string[];
     try {
-      entries = fs.readdirSync(dir);
+      entries = await fs.promises.readdir(dir);
     } catch {
       continue; // project may not have this subdir
     }
-    for (const file of entries) {
-      if (!file.endsWith('.md')) continue;
-      const full = path.join(dir, file);
-      let content: string;
-      let mtime = 0;
-      try {
-        const stat = fs.statSync(full);
-        mtime = stat.mtimeMs;
-        content = fs.readFileSync(full, 'utf-8');
-      } catch {
-        continue;
-      }
-      const fm = parseTaskFrontmatter(content);
-      if (!fm) continue;
-      // Files in completed/ are Done even if the frontmatter predates the move.
-      const status = String(fm.status || (sub === 'completed' ? 'Done' : 'To Do'));
-      tasks.push({
-        id: String(fm.id || file.replace(/\.md$/, '')),
-        title: String(fm.title || file.replace(/\.md$/, '')),
-        status,
-        assignee: asArray(fm.assignee),
-        labels: asArray(fm.labels),
-        priority: fm.priority ? String(fm.priority) : undefined,
-        file,
-        sub,
-        project: { name: project.name, path: project.path },
-        mtime,
-        created_date: fm.created_date ? String(fm.created_date) : undefined,
-        updated_date: fm.updated_date ? String(fm.updated_date) : undefined,
-      });
+    // Read files within a dir concurrently so the main-process event loop
+    // isn't blocked serially scanning many archived markdown files (TASK-216).
+    const parsed = await Promise.all(
+      entries
+        .filter((file) => file.endsWith('.md'))
+        .map(async (file): Promise<BacklogTask | null> => {
+          const full = path.join(dir, file);
+          let content: string;
+          let mtime = 0;
+          try {
+            const stat = await fs.promises.stat(full);
+            mtime = stat.mtimeMs;
+            content = await fs.promises.readFile(full, 'utf-8');
+          } catch {
+            return null;
+          }
+          const fm = parseTaskFrontmatter(content);
+          if (!fm) return null;
+          // Archived tasks group under a synthetic "Archived" status so they land
+          // in their own column rather than mixing back into the live workflow.
+          // Files in completed/ are Done even if the frontmatter predates the move.
+          const isArchived = sub === 'archive/tasks';
+          const status = isArchived
+            ? 'Archived'
+            : String(fm.status || (sub === 'completed' ? 'Done' : 'To Do'));
+          return {
+            id: String(fm.id || file.replace(/\.md$/, '')),
+            title: String(fm.title || file.replace(/\.md$/, '')),
+            status,
+            assignee: asArray(fm.assignee),
+            labels: asArray(fm.labels),
+            priority: fm.priority ? String(fm.priority) : undefined,
+            file,
+            sub,
+            project: { name: project.name, path: project.path },
+            mtime,
+            created_date: fm.created_date ? String(fm.created_date) : undefined,
+            updated_date: fm.updated_date ? String(fm.updated_date) : undefined,
+          };
+        }),
+    );
+    for (const t of parsed) {
+      if (t) tasks.push(t);
     }
   }
   return tasks;
 }
 
-function listAllTasks(projects: BacklogProjectRef[]): BacklogTask[] {
+async function listAllTasks(
+  projects: BacklogProjectRef[],
+  includeArchived = false,
+): Promise<BacklogTask[]> {
+  const perProject = await Promise.all(
+    projects
+      .filter((p) => p && p.path)
+      .map((p) => scanProject(p, includeArchived)),
+  );
   const all: BacklogTask[] = [];
-  for (const p of projects) {
-    if (!p || !p.path) continue;
-    all.push(...scanProject(p));
-  }
+  for (const list of perProject) all.push(...list);
   return all;
 }
 
+// Subdirs getTask is allowed to read from (includes archive so the board can
+// open archived task detail when "show archived" is on).
+const READ_SUBDIRS = [...TASK_SUBDIRS, 'archive/tasks'];
+
 function getTask(projectPath: string, sub: string, file: string): BacklogTaskDetail | null {
   // Guard against path traversal - sub must be a known subdir and file a bare name.
-  if (!TASK_SUBDIRS.includes(sub as any)) return null;
+  if (!READ_SUBDIRS.includes(sub)) return null;
   if (file.includes('/') || file.includes('\\') || file.includes('..')) return null;
   const full = path.join(projectPath, 'backlog', sub, file);
   let content: string;
@@ -207,9 +233,9 @@ function getTask(projectPath: string, sub: string, file: string): BacklogTaskDet
 // ── IPC wiring ───────────────────────────────────────────────────────
 
 export function registerBacklogHandlers(): void {
-  ipcMain.handle(IPC.BACKLOG_LIST_TASKS, async (_e, projects: BacklogProjectRef[]) => {
+  ipcMain.handle(IPC.BACKLOG_LIST_TASKS, async (_e, projects: BacklogProjectRef[], includeArchived?: boolean) => {
     try {
-      return listAllTasks(projects || []);
+      return await listAllTasks(projects || [], !!includeArchived);
     } catch (err) {
       console.error('[backlog] listTasks failed:', err);
       return [];
@@ -242,6 +268,23 @@ export function registerBacklogHandlers(): void {
     IPC.BACKLOG_ARCHIVE_TASK,
     async (_e, projectPath: string, taskId: string) => {
       return archiveTask(projectPath, taskId);
+    },
+  );
+
+  // Permanent delete (distinct from archive): send the task file to the OS
+  // Recycle Bin / Trash so it's removed from the backlog but still recoverable
+  // outside the app if the user deleted it by mistake.
+  ipcMain.handle(
+    IPC.BACKLOG_DELETE_TASK,
+    async (_e, projectPath: string, taskId: string) => {
+      const loc = locateTaskFileAnywhere(projectPath, taskId);
+      if (!loc) return { ok: false, error: `Task ${taskId} not found` };
+      try {
+        await shell.trashItem(loc.full);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
     },
   );
 

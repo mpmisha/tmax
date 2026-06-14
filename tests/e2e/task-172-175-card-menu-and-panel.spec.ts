@@ -73,3 +73,36 @@ test('card right-click menu and side-panel mode', async () => {
     try { rmSync(projectDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
+
+test('Esc on the Prompt Editor (over the board) closes only the editor', async () => {
+  const projectDir = seedProject();
+  const { window, close } = await launchTmax({
+    preSeed: (userDataDir) => {
+      writeFileSync(
+        join(userDataDir, 'tmax-config.json'),
+        JSON.stringify({ backlogDisplayMode: 'overlay', backlogProjects: [{ name: 'proj', path: projectDir.replace(/\\/g, '/') }] }),
+        'utf-8',
+      );
+    },
+  });
+  try {
+    await window.waitForSelector('.terminal-panel', { timeout: 15_000 });
+    // Open the board, then layer the Prompt Editor on top of the focused pane.
+    await window.evaluate(() => (window as any).__terminalStore.getState().toggleBacklog());
+    await expect(window.locator('.backlog-window')).toBeVisible({ timeout: 5_000 });
+    await window.evaluate(() => {
+      const s = (window as any).__terminalStore.getState();
+      const id = s.focusedTerminalId || [...s.terminals.keys()][0];
+      s.openPromptComposer(id);
+    });
+    await expect(window.locator('.prompt-composer-card')).toBeVisible({ timeout: 5_000 });
+
+    // Esc must dismiss only the editor; the board stays open underneath.
+    await window.keyboard.press('Escape');
+    await expect(window.locator('.prompt-composer-card')).toHaveCount(0, { timeout: 3_000 });
+    await expect(window.locator('.backlog-window')).toBeVisible();
+  } finally {
+    await close();
+    try { rmSync(projectDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});

@@ -59,6 +59,25 @@ function isActiveStatus(status: CopilotSessionStatus): boolean {
   return status !== 'idle';
 }
 
+// A session is considered "running" only if recently active too.
+const RUNNING_RECENT_MS = 30_000;
+
+// TASK-220 (revised): A session counts as "running" when its status is non-idle
+// AND it's actually live. "Live" means either backed by an open pane in tmax
+// (id in openSessionIds) OR it has emitted activity in the last RUNNING_RECENT_MS.
+// The recency clause matters because a genuinely-running session can be tagged
+// <synthetic> (reconstructed from logs, not spawned by tmax) yet still be active
+// - the original open-only check wrongly hid those. The recency window keeps a
+// stale last-log 'thinking' status (activity minutes ago) from reading as live.
+function isRunning(
+  session: { id: string; status: CopilotSessionStatus; lastActivityTime?: number },
+  openSessionIds: Set<string>,
+): boolean {
+  if (!isActiveStatus(session.status)) return false;
+  if (openSessionIds.has(session.id)) return true;
+  return !!session.lastActivityTime && Date.now() - session.lastActivityTime < RUNNING_RECENT_MS;
+}
+
 function relativeTime(ts: number): string {
   if (!ts) return '';
   const diff = Math.floor((Date.now() - ts) / 1000);
@@ -153,10 +172,11 @@ function sortSessions(
     const aPin = pinned[a.id] ? 1 : 0;
     const bPin = pinned[b.id] ? 1 : 0;
     if (aPin !== bPin) return bPin - aPin;
-    // Running (non-idle) sessions float above idle ones so active work is
-    // always visible at the top of the list.
-    const aActive = isActiveStatus(a.status) ? 1 : 0;
-    const bActive = isActiveStatus(b.status) ? 1 : 0;
+    // Running (non-idle AND live in tmax) sessions float above the rest so
+    // active work is always visible at the top of the list. Synthetic /
+    // log-only sessions (not open in tmax) never count as running here.
+    const aActive = isRunning(a, openSessionIds) ? 1 : 0;
+    const bActive = isRunning(b, openSessionIds) ? 1 : 0;
     if (aActive !== bActive) return bActive - aActive;
     if (sortMode === 'time-desc') {
       // Smart-sort behavior carried over from the old 'activity' mode:
@@ -478,9 +498,10 @@ const CopilotPanel: React.FC = () => {
       if (bk === PINNED_GROUP_KEY) return 1;
       if (ak === '(no repo)') return 1;
       if (bk === '(no repo)') return -1;
-      // Groups containing a running (non-idle) session float to the top.
-      const aActive = av.some((s) => isActiveStatus(s.status)) ? 1 : 0;
-      const bActive = bv.some((s) => isActiveStatus(s.status)) ? 1 : 0;
+      // Groups containing a genuinely running session (non-idle AND live in
+      // tmax) float to the top. Synthetic/log-only sessions don't count.
+      const aActive = av.some((s) => isRunning(s, openSessionIds)) ? 1 : 0;
+      const bActive = bv.some((s) => isRunning(s, openSessionIds)) ? 1 : 0;
       if (aActive !== bActive) return bActive - aActive;
       if (sortColumn === 'title') {
         // Sort by the visible group label (disambiguated leaf, e.g. "tmax")
@@ -507,7 +528,7 @@ const CopilotPanel: React.FC = () => {
       return sortDir === 'desc' ? bRecent - aRecent : aRecent - bRecent;
     });
     return sortedGroups.flatMap(([, group]) => group);
-  }, [filtered, groupByRepo, pinnedSessions, sortMode, sortColumn, sortDir]);
+  }, [filtered, groupByRepo, pinnedSessions, sortMode, sortColumn, sortDir, openSessionIds]);
 
   // TASK-35: per-group display label (preserves original casing from the
   // first session encountered in each lowercase bucket).
@@ -1241,8 +1262,16 @@ const CopilotPanel: React.FC = () => {
         {displayList.slice(0, renderLimit).map((session, index) => {
           const title = getTitle(session);
           const subtitle = getSubtitle(session);
-          const active = isActiveStatus(session.status);
           const isOpen = openSessionIds.has(session.id);
+          // TASK-220: only treat a session as running (pulsing dot, status
+          // text, running highlight) when it's non-idle AND live in tmax.
+          // Synthetic/log-only sessions keep a stale 'thinking' status but
+          // must render as idle.
+          const active = isRunning(session, openSessionIds);
+          // Resolve the displayed status to 'idle' for non-running sessions so
+          // the dot color/label and status text don't surface a stale log
+          // status (e.g. 'Thinking') for a session with no live pane.
+          const displayStatus: CopilotSessionStatus = active ? session.status : 'idle';
           const time = relativeTime(session.lastActivityTime);
           const hasStats = session.messageCount > 0 || session.toolCallCount > 0;
           const paneColor = sessionColors.get(session.id);
@@ -1318,8 +1347,8 @@ const CopilotPanel: React.FC = () => {
             >
               <span
                 className={`ai-status-dot${active ? ' pulsing' : ''}`}
-                style={{ background: STATUS_COLORS[session.status] }}
-                title={STATUS_LABELS[session.status]}
+                style={{ background: STATUS_COLORS[displayStatus] }}
+                title={STATUS_LABELS[displayStatus]}
               />
               <div className="ai-session-info">
                 <div className="ai-session-title-row">

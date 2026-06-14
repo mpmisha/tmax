@@ -1,11 +1,11 @@
 ---
-id: TASK-180
+id: TASK-202
 title: Add prompt composer to terminal context menu
-status: In Progress
+status: Done
 assignee:
   - '@mpmisha'
 created_date: '2026-06-14 06:39'
-updated_date: '2026-06-14 06:54'
+updated_date: '2026-06-14 09:37'
 labels:
   - feature
   - frontend
@@ -81,27 +81,5 @@ Implementation done on branch users/mimer/feature/prompt-composer.
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Adds a notepad-style prompt composer to each terminal pane, accessible from the pane right-click menu (📝 Prompt composer).
-
-Why:
-Composing multi-line prompts directly in the terminal is awkward - newlines and paste are fiddly, and a stray Enter submits a half-written message. The composer is a plain modal textarea so the user can write/edit freely, then copy or paste the whole thing into the terminal as a single block.
-
-What changed:
-- New PromptComposer.tsx modal (palette-backdrop pattern, mirrors SessionSummary). Bottom footer holds three buttons: Copy, Submit, Close.
-  - Copy: writes the textarea contents to the clipboard via window.terminalAPI.clipboardWrite, with transient "✓ Copied" feedback.
-  - Submit: pastes into the focused terminal using bracketed paste (\x1b[200~...\x1b[201~) - no trailing \r, so the user reviews before pressing Enter. Same pattern as DiffReview.sendComments.
-  - Close / Esc / backdrop click: dismiss without sending.
-- Terminal store gets promptComposerRequest (TerminalId | null) and composerDrafts (per-pane drafts) with openPromptComposer / closePromptComposer / setPromptComposerDraft.
-- closeTerminal drops the draft and clears the composer request when the targeted pane goes away, so drafts never outlive their terminal.
-- TerminalPanel pane context menu gets a new "📝 Prompt composer" item placed right after "Show prompts".
-- Mounted in App.tsx alongside <SessionSummary />.
-- CSS in global.css under a new "Prompt Composer" section, styled to match the session summary card family.
-
-Scope notes:
-- Drafts persist only for the current app session (no disk persistence by design).
-- No keyboard shortcut yet; opens via the context menu only.
-
-Validation:
-- npx tsc --noEmit: no new errors introduced (count went 36 -> 32 vs. main; remaining errors are pre-existing and unrelated).
-- npx vite build --config vite.renderer.config.ts: succeeds.
+Shipped via PR #133 (merged into main) and extended: prompt editor available on all panes (not just AI sessions), renamed Composer -> Editor, default shortcut Ctrl+Alt+C (Ctrl+Alt+P collided with Windows), seeds the draft from the pane's current input line, and pastes images as file paths. Renumbered 180->202 to resolve an ID collision with the markdown/footer task.
 <!-- SECTION:FINAL_SUMMARY:END -->

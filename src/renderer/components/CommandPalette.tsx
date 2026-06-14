@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTerminalStore } from '../state/terminal-store';
-import { formatKeyForPlatform } from '../utils/platform';
+import { formatKeyForPlatform, isMac } from '../utils/platform';
+import { DEFAULT_BINDINGS } from '../hooks/useKeybindings';
 import { tokenizeAnd, matchesAllTokens } from '../../shared/and-filter';
 import { getTerminalEntry } from '../terminal-registry';
 import { MOUSE_RESET_SEQUENCE, TERMINAL_RECOVER_SEQUENCE } from '../utils/terminal-recover';
@@ -18,6 +19,54 @@ interface Command {
   action: () => void;
 }
 
+// Palette command id -> keybinding action (useKeybindings.ts). Most palette
+// ids match the binding action name 1:1, but several diverge (the palette id
+// describes the menu entry, the action drives dispatchAction). Only ids that
+// resolve to a bindable action get a "Change shortcut" right-click option;
+// commands with no entry here AND no matching action are not rebindable.
+const PALETTE_ID_TO_ACTION: Record<string, string> = {
+  newTerminal: 'createTerminal',
+  jumpToTerminal: 'switchTerminalList',
+  paneHints: 'switchTerminal',
+  toggleViewMode: 'toggleFocusMode',
+  toggleDormant: 'toggleDormant',
+  equalize: 'equalizeLayout',
+  copilotSessions: 'copilotPanel',
+  worktreePanel: 'worktreePanel',
+  dirPicker: 'dirPicker',
+  colorizeAllTabs: 'colorizeAllTabs',
+  hideTabBar: 'hideTabBar',
+  fileExplorer: 'fileExplorer',
+  jumpToPrompt: 'showPrompts',
+  promptComposer: 'promptComposer',
+  searchPrompts: 'searchPrompts',
+  toggleTranscript: 'toggleTranscript',
+  shortcuts: 'showShortcuts',
+  settings: 'openSettings',
+  backlog: 'openBacklog',
+  splitRight: 'splitHorizontal',
+  splitLeft: 'splitHorizontalLeft',
+  splitDown: 'splitVertical',
+  splitUp: 'splitVerticalUp',
+};
+
+// Friendly names for bindable actions that have no palette row (so the rebind
+// conflict dialog reads "...assigned to Command Palette" not "...commandPalette").
+const ACTION_LABELS: Record<string, string> = {
+  commandPalette: 'Command Palette',
+};
+
+// Resolve a palette command to its bindable keybinding action, or null if the
+// command can't be rebound. Falls back to the id when it's already a known
+// action name (so future palette entries that match an action work for free).
+function actionForCommandId(id: string): string | null {
+  const mapped = PALETTE_ID_TO_ACTION[id];
+  if (mapped) return mapped;
+  const isKnownAction =
+    Object.values(DEFAULT_BINDINGS).includes(id) || id === 'commandPalette';
+  return isKnownAction ? id : null;
+}
+
 const CommandPalette: React.FC = () => {
   const show = useTerminalStore((s) => s.showCommandPalette);
   // Subscribe to the focused pane's aiSessionId so commands that only make
@@ -30,6 +79,11 @@ const CommandPalette: React.FC = () => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dialog, setDialog] = useState<{ title: string; placeholder?: string; options?: string[]; onSubmit: (value: string) => void } | null>(null);
+  // TASK-193: action currently being re-recorded via right-click "Change
+  // shortcut". null = not recording.
+  const [rebindingAction, setRebindingAction] = useState<string | null>(null);
+  // Right-click context menu for a palette command (rebind / reset).
+  const [rebindMenu, setRebindMenu] = useState<{ x: number; y: number; cmd: Command; action: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -107,7 +161,7 @@ const CommandPalette: React.FC = () => {
       ...(focusedAiSessionId ? [{
         id: 'promptComposer',
         label: 'Open Prompt Editor',
-        shortcut: 'Ctrl+Alt+C',
+        shortcut: 'Ctrl+Alt+E',
         action: () => { const id = focusedId(); if (id) store().openPromptComposer(id); },
       }] : []),
       { id: 'searchPrompts', label: 'Search Prompts Across All Panes', shortcut: 'Ctrl+Shift+Y', action: () => store().togglePromptSearch() },
@@ -254,6 +308,30 @@ const CommandPalette: React.FC = () => {
     ];
   }, [focusedAiSessionId]);
 
+  // Effective action -> key, merging defaults with config overrides exactly
+  // like useKeybindings does. Lets a palette row display the user's rebound
+  // shortcut (TASK-193) instead of the static default baked into the command.
+  const configKeybindings = useTerminalStore((s) => s.config?.keybindings);
+  const effectiveKeyByAction = useMemo(() => {
+    const merged: Record<string, string> = { ...DEFAULT_BINDINGS }; // key -> action
+    if (Array.isArray(configKeybindings)) {
+      const cfgActions = new Set(configKeybindings.map((b) => b.action));
+      for (const [key, action] of Object.entries(merged)) if (cfgActions.has(action)) delete merged[key];
+      for (const b of configKeybindings) merged[b.key] = b.action;
+    }
+    const byAction: Record<string, string> = {};
+    for (const [key, action] of Object.entries(merged)) if (!byAction[action]) byAction[action] = key;
+    return byAction;
+  }, [configKeybindings]);
+
+  // Shortcut text to render for a command: prefer the live binding for its
+  // action, fall back to the static label baked into the command.
+  const shortcutFor = useCallback((cmd: Command): string | undefined => {
+    const action = actionForCommandId(cmd.id);
+    if (action && effectiveKeyByAction[action]) return effectiveKeyByAction[action];
+    return cmd.shortcut;
+  }, [effectiveKeyByAction]);
+
   const filtered = useMemo(() => {
     const tokens = tokenizeAnd(query);
     if (tokens.length === 0) return commands;
@@ -294,6 +372,80 @@ const CommandPalette: React.FC = () => {
     // Delay action slightly so palette closes first
     requestAnimationFrame(() => cmd.action());
   }, [close]);
+
+  // TASK-193: persist a new key combo for an action, mirroring the rebind
+  // logic in Settings > Keybindings (config.keybindings overrides defaults).
+  const rebind = useCallback((action: string, key: string) => {
+    const store = useTerminalStore.getState();
+    const current = store.config?.keybindings ?? [];
+    const next = current.filter((b) => b.action !== action);
+    next.push({ action, key });
+    store.updateConfig({ keybindings: next });
+  }, []);
+
+  // Reset an action to its default shortcut by dropping any user override.
+  const resetBinding = useCallback((action: string) => {
+    const store = useTerminalStore.getState();
+    const current = store.config?.keybindings ?? [];
+    store.updateConfig({ keybindings: current.filter((b) => b.action !== action) });
+  }, []);
+
+  // Human-readable label for an action (for confirm dialogs), from the command
+  // whose id maps to it; falls back to a friendly name for bindable actions
+  // that have no palette row (e.g. the palette itself), then the raw action.
+  const labelForAction = useCallback(
+    (action: string) =>
+      commands.find((c) => actionForCommandId(c.id) === action)?.label ??
+      ACTION_LABELS[action] ??
+      action,
+    [commands],
+  );
+
+  // Capture the next key combo while a palette command is being rebound, then
+  // CONFIRM before applying (and warn if the combo is already taken). Same
+  // capture pattern as KeybindingsSettings: ignore lone modifiers, Esc cancels,
+  // metaKey on Mac for the primary modifier.
+  useEffect(() => {
+    if (rebindingAction === null) return;
+    const handler = async (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      let key = e.key;
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) return;
+      if (key === 'Escape') { setRebindingAction(null); return; }
+      const parts: string[] = [];
+      if (isMac ? e.metaKey : e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+      if (key === ' ') key = 'Space';
+      if (key.length === 1) key = key.toUpperCase();
+      parts.push(key);
+      const keyStr = parts.join('+');
+      const action = rebindingAction;
+      setRebindingAction(null); // leave recording mode before the async confirm
+      // Is this combo already bound to a different command?
+      const conflict = Object.entries(effectiveKeyByAction).find(([a, k]) => k === keyStr && a !== action)?.[0];
+      const shown = formatKeyForPlatform(keyStr);
+      const message = conflict
+        ? `${shown} is currently assigned to "${labelForAction(conflict)}". Reassign it to "${labelForAction(action)}"? "${labelForAction(conflict)}" will lose this shortcut.`
+        : `Assign ${shown} to "${labelForAction(action)}"?`;
+      const ok = await confirmDialog({ title: 'Change shortcut?', message, confirmText: 'Assign', danger: !!conflict });
+      if (!ok) return;
+      rebind(action, keyStr);
+      useTerminalStore.getState().addToast('Shortcut updated');
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [rebindingAction, rebind, effectiveKeyByAction, labelForAction]);
+
+  // Right-click opens a small menu (Reassign / Reset), rather than jumping
+  // straight into capture - so a stray right-click can't silently rebind.
+  const handleContextMenu = useCallback((e: React.MouseEvent, cmd: Command) => {
+    const action = actionForCommandId(cmd.id);
+    if (!action) return; // not rebindable - let the native menu through
+    e.preventDefault();
+    setRebindMenu({ x: e.clientX, y: e.clientY, cmd, action });
+  }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     switch (e.key) {
@@ -344,22 +496,61 @@ const CommandPalette: React.FC = () => {
           onKeyDown={handleKeyDown}
         />
         <div className="palette-list" ref={listRef}>
-          {filtered.map((cmd, index) => (
-            <div
-              key={cmd.id}
-              className={`palette-item${index === selectedIndex ? ' selected' : ''}`}
-              onClick={() => runCommand(cmd)}
-              onMouseEnter={() => setSelectedIndex(index)}
-            >
-              <span className="palette-label">{cmd.label}</span>
-              {cmd.shortcut && <kbd className="palette-shortcut">{formatKeyForPlatform(cmd.shortcut)}</kbd>}
-            </div>
-          ))}
+          {filtered.map((cmd, index) => {
+            const rebindable = actionForCommandId(cmd.id) !== null;
+            const recording = rebindable && rebindingAction === actionForCommandId(cmd.id);
+            return (
+              <div
+                key={cmd.id}
+                className={`palette-item${index === selectedIndex ? ' selected' : ''}`}
+                onClick={() => { if (recording) { setRebindingAction(null); return; } runCommand(cmd); }}
+                onMouseEnter={() => setSelectedIndex(index)}
+                onContextMenu={(e) => handleContextMenu(e, cmd)}
+                title={rebindable ? 'Right-click to change shortcut' : undefined}
+              >
+                <span className="palette-label">{cmd.label}</span>
+                {recording ? (
+                  <kbd className="palette-shortcut recording">Press keys... (Esc)</kbd>
+                ) : (
+                  (() => { const sc = shortcutFor(cmd); return sc ? <kbd className="palette-shortcut">{formatKeyForPlatform(sc)}</kbd> : null; })()
+                )}
+              </div>
+            );
+          })}
           {filtered.length === 0 && (
             <div className="palette-empty">No matching commands</div>
           )}
         </div>
       </div>
+      {rebindMenu && (
+        <div
+          className="palette-rebind-overlay"
+          onClick={() => setRebindMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setRebindMenu(null); }}
+        >
+          <div
+            className="context-menu"
+            style={{ position: 'fixed', left: rebindMenu.x, top: rebindMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="context-menu-header">{rebindMenu.cmd.label}</div>
+            <button
+              className="context-menu-item"
+              onClick={() => { const a = rebindMenu.action; setRebindMenu(null); setRebindingAction(a); }}
+            >
+              Reassign shortcut…
+            </button>
+            {Array.isArray(configKeybindings) && configKeybindings.some((b) => b.action === rebindMenu.action) && (
+              <button
+                className="context-menu-item"
+                onClick={() => { resetBinding(rebindMenu.action); setRebindMenu(null); useTerminalStore.getState().addToast('Shortcut reset to default'); }}
+              >
+                Reset to default
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

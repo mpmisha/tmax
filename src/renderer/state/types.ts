@@ -248,6 +248,11 @@ export interface AppConfig {
   backlogPanelWidth?: number;
   // Which side the docked Backlog panel sits on. Default 'right'. (TASK-179)
   backlogPanelSide?: 'left' | 'right';
+  // Collapse the docked Backlog panel to a thin edge strip. (TASK-222)
+  backlogPanelCollapsed?: boolean;
+  // Map of task key ("projectPath::id") -> the AI agent session working it, so
+  // the task detail can show that agent's live output. (TASK-223)
+  backlogTaskAgents?: Record<string, { sessionId: string; provider: 'copilot' | 'claude-code' }>;
 }
 
 // ── Drag & drop ──────────────────────────────────────────────────────

@@ -96,6 +96,9 @@ const TranscriptPanel: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   // DOM node per *global* message index, so we can scroll a hit into view.
   const msgRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  // True while a search is positioned on a match, so the live poll's
+  // auto-scroll-to-bottom doesn't yank the view away from the hit.
+  const searchActiveRef = useRef(false);
 
   const atBottom = () => {
     const el = bodyRef.current;
@@ -137,7 +140,9 @@ const TranscriptPanel: React.FC = () => {
           const wasAtBottom = initial || atBottom();
           sigRef.current = nextSig;
           setMsgs(next);
-          if (wasAtBottom) scrollToBottom();
+          // Don't fight an active search: if the user is parked on a match,
+          // leave the scroll position where the search put it.
+          if (wasAtBottom && !searchActiveRef.current) scrollToBottom();
         })
         .catch(() => { if (!cancelled && initial) setMsgs([]); });
     };
@@ -207,12 +212,21 @@ const TranscriptPanel: React.FC = () => {
 
   // Jump the body to the active match. Depends on the match position + query so
   // it fires on navigation, not on every 2s poll (same-length result is a no-op).
+  // matchIdx is included so navigating wraps re-fire even at the same clamped
+  // index. We scroll the transcript-body container directly (rather than
+  // scrollIntoView, which can pick the wrong scrollable ancestor) and center
+  // the hit using rects so nesting in day-groups doesn't throw off the math.
   useEffect(() => {
+    searchActiveRef.current = searchOpen && matches.length > 0;
     if (!matches.length) return;
-    const target = matches[safeMatchIdx];
-    const el = msgRefs.current.get(target);
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [safeMatchIdx, query, matches.length]);
+    const el = msgRefs.current.get(matches[safeMatchIdx]);
+    const body = bodyRef.current;
+    if (!el || !body) return;
+    const elRect = el.getBoundingClientRect();
+    const bodyRect = body.getBoundingClientRect();
+    const delta = elRect.top - bodyRect.top - (body.clientHeight - el.clientHeight) / 2;
+    body.scrollTo({ top: body.scrollTop + delta, behavior: 'smooth' });
+  }, [safeMatchIdx, matchIdx, query, matches.length, searchOpen]);
 
   const gotoMatch = useCallback((delta: number) => {
     setMatchIdx((cur) => {

@@ -57,6 +57,114 @@ test('full lifecycle works with no git and without calling the CLI (native only)
   }
 });
 
+// These exercise the native un-archive / find-anywhere / create-with-description
+// logic added this session. They never call the `backlog` CLI - all assertions
+// read the filesystem directly so they're hermetic and fast.
+test.describe('native un-archive + find-anywhere (no CLI)', () => {
+  const fs = require('fs');
+  const tasksDir = (d: string) => join(d, 'backlog', 'tasks');
+  const archiveDir = (d: string) => join(d, 'backlog', 'archive', 'tasks');
+  const onlyFile = (dir: string) => {
+    const ents = fs.readdirSync(dir);
+    return ents.length ? join(dir, ents[0]) : null;
+  };
+
+  test('editTask un-archives a task (moves back to tasks/ and sets status)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-unarch-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      expect(createTask({ projectPath: dir, title: 'to be archived' }).id).toBe('TASK-1');
+      expect(archiveTask(dir, 'TASK-1').ok).toBe(true);
+      // Precondition: it left tasks/ and is in archive/tasks.
+      expect(fs.readdirSync(tasksDir(dir)).length).toBe(0);
+      expect(fs.readdirSync(archiveDir(dir)).length).toBe(1);
+
+      // Un-archive by editing with a real, non-Archived status.
+      expect(editTask({ projectPath: dir, taskId: 'TASK-1', status: 'In Progress' }).ok).toBe(true);
+
+      // File moved BACK to tasks/, gone from archive, status updated.
+      expect(fs.readdirSync(archiveDir(dir)).length).toBe(0);
+      expect(fs.readdirSync(tasksDir(dir)).length).toBe(1);
+      const content = fs.readFileSync(onlyFile(tasksDir(dir))!, 'utf-8');
+      expect(content).toMatch(/status: In Progress/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  test("editTask with status 'Archived' on a non-archived task does NOT move it", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-noarch-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      expect(createTask({ projectPath: dir, title: 'stays put' }).id).toBe('TASK-1');
+      // Setting status to 'Archived' must not relocate the file into archive/tasks.
+      expect(editTask({ projectPath: dir, taskId: 'TASK-1', status: 'Archived' }).ok).toBe(true);
+      expect(fs.readdirSync(tasksDir(dir)).length).toBe(1);
+      expect(fs.readdirSync(archiveDir(dir)).length).toBe(0);
+      const content = fs.readFileSync(onlyFile(tasksDir(dir))!, 'utf-8');
+      expect(content).toMatch(/status: Archived/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  test('editTask finds an archived task and edits it in place (no status change)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-archedit-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      createTask({ projectPath: dir, title: 'archived edit target' });
+      expect(archiveTask(dir, 'TASK-1').ok).toBe(true);
+      // Edit only the description - no status, so it must STAY in archive/tasks.
+      expect(editTask({ projectPath: dir, taskId: 'TASK-1', description: 'edited while archived' }).ok).toBe(true);
+      expect(fs.readdirSync(tasksDir(dir)).length).toBe(0);
+      expect(fs.readdirSync(archiveDir(dir)).length).toBe(1);
+      const content = fs.readFileSync(onlyFile(archiveDir(dir))!, 'utf-8');
+      expect(content).toMatch(/DESCRIPTION:BEGIN[\s\S]*edited while archived[\s\S]*DESCRIPTION:END/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  test('createTask threads a description into the Description section', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-createdesc-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      const c = createTask({ projectPath: dir, title: 'with body', description: 'hello world' });
+      expect(c.id).toBe('TASK-1');
+      const content = fs.readFileSync(onlyFile(tasksDir(dir))!, 'utf-8');
+      expect(content).toMatch(/DESCRIPTION:BEGIN[\s\S]*hello world[\s\S]*DESCRIPTION:END/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  test('editTask un-archive handles a simultaneous title change (new slug + status)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-unarchtitle-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      createTask({ projectPath: dir, title: 'old title here' });
+      expect(archiveTask(dir, 'TASK-1').ok).toBe(true);
+      // Un-archive AND rename in one edit.
+      expect(editTask({ projectPath: dir, taskId: 'TASK-1', status: 'In Progress', title: 'brand new title' }).ok).toBe(true);
+      // Lands in tasks/ with the new slug filename.
+      expect(fs.readdirSync(archiveDir(dir)).length).toBe(0);
+      const files = fs.readdirSync(tasksDir(dir));
+      expect(files.length).toBe(1);
+      expect(files[0]).toBe('task-1 - brand-new-title.md');
+      const content = fs.readFileSync(join(tasksDir(dir), files[0]), 'utf-8');
+      expect(content).toMatch(/status: In Progress/);
+      expect(content).toMatch(/title: brand new title/);
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+});
+
 test.describe('native backlog writes are CLI-compatible', () => {
   test.skip(!cliAvailable, 'backlog CLI not on PATH');
 
@@ -158,6 +266,28 @@ test.describe('native backlog writes are CLI-compatible', () => {
       // Frontmatter id is uppercase TASK-N; filename uses lowercase task-N.
       const cfg = readFileSync(join(dir, 'backlog', 'config.yml'), 'utf-8');
       expect(cfg).toContain('statuses:');
+    } finally {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  test('archived task ids are never reused (self-healing allocation, TASK-206)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tmax-native-'));
+    try {
+      gitInit(dir);
+      initProject(dir, 'scratch');
+      const a = createTask({ projectPath: dir, title: 'one' });
+      const b = createTask({ projectPath: dir, title: 'two' });
+      expect(a.id).toBe('TASK-1');
+      expect(b.id).toBe('TASK-2');
+      // Archive the highest id, then create again: the archived id (2) must NOT
+      // be reused even though it's no longer in tasks/. This is the exact bug
+      // the CLI's stored next_id counter hit during development.
+      archiveTask(dir, 'TASK-2');
+      const c = createTask({ projectPath: dir, title: 'three' });
+      expect(c.id).toBe('TASK-3');
+      // The archived file still exists with its original id.
+      expect(existsSync(join(dir, 'backlog', 'archive', 'tasks', 'task-2 - two.md'))).toBe(true);
     } finally {
       try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     }

@@ -135,6 +135,10 @@ export interface AppConfig {
   backlogPanelWidth?: number;
   /** Which side the docked Backlog panel sits on. Default 'right'. (TASK-179) */
   backlogPanelSide?: 'left' | 'right';
+  /** Collapse the docked Backlog panel to a thin edge strip. (TASK-222) */
+  backlogPanelCollapsed?: boolean;
+  /** Task key ("projectPath::id") -> AI agent session working it. (TASK-223) */
+  backlogTaskAgents?: Record<string, { sessionId: string; provider: 'copilot' | 'claude-code' }>;
 }
 
 function findPwsh(): string | null {

@@ -44,21 +44,73 @@ export function getAllTerminals(): Terminal[] {
  * shell prompt (PowerShell / cmd / generic `>`/`❯`). Heuristic - returns '' if
  * nothing meaningful is found.
  */
+// Box-drawing / block chars (the borders of Copilot/Claude input boxes) become
+// spaces so they don't pollute the captured text. A row that is *only* border
+// chars therefore cleans to blank, which we use as a boundary.
+function cleanRow(buf: { getLine: (r: number) => { translateToString: (t: boolean) => string } | undefined }, row: number): string | null {
+  const l = buf.getLine(row);
+  if (!l) return null;
+  return l.translateToString(true).replace(/[─-▟]/g, ' ');
+}
+
+function looksLikePrompt(s: string): boolean {
+  const t = s.trim();
+  return /^PS [^>]*>/.test(t) || /^[A-Za-z]:\\[^>]*>/.test(t) || /^[>❯➜»]/.test(t);
+}
+
 export function getCurrentInputLine(id: string): string {
   const entry = registry.get(id);
   if (!entry) return '';
   const buf = entry.terminal.buffer.active;
-  const line = buf.getLine(buf.baseY + buf.cursorY);
-  if (!line) return '';
-  // Full cursor row (trimmed right), not just up to the caret - the caret may
-  // sit mid-line. (Multi-line input in an AI-CLI box can't be reliably read.)
-  let text = line.translateToString(true);
-  // Box-drawing / block chars -> spaces (Copilot/Claude input boxes).
-  text = text.replace(/[─-▟]/g, ' ').trimStart();
-  // Strip a leading shell prompt, if present.
+  const cursorRow = buf.baseY + buf.cursorY;
+
+  // Reconstruct the whole input block, not just the caret's row. Two cases:
+  //  - long input soft-wrapped across rows (xterm marks continuations
+  //    `isWrapped`) - join those without a newline;
+  //  - genuine multi-line input typed into an AI-CLI box ("aaa"⏎"vvv") - those
+  //    are separate rows, joined with newlines.
+  // We bound the block by walking up from the caret over contiguous content
+  // rows, stopping at a blank row (box border cleans to blank), a shell prompt,
+  // or the top of the buffer.
+  let end = cursorRow;
+  while (end + 1 < buf.length) {
+    const l = buf.getLine(end + 1);
+    if (l && l.isWrapped) end++;
+    else break;
+  }
+  let start = cursorRow;
+  for (let guard = 0; guard < 100 && start > 0; guard++) {
+    const cur = buf.getLine(start);
+    if (cur && cur.isWrapped) { start--; continue; } // continuation - keep climbing
+    const prev = cleanRow(buf, start - 1);
+    if (prev === null || prev.trim() === '' || looksLikePrompt(prev)) break;
+    start--;
+  }
+
+  // Build the block: continuations append in place, new logical lines add a \n.
+  let text = '';
+  for (let row = start; row <= end; row++) {
+    const l = buf.getLine(row);
+    const clean = cleanRow(buf, row) ?? '';
+    if (row === start) text = clean;
+    else if (l && l.isWrapped) text += clean;
+    else text += '\n' + clean;
+  }
+
+  // Strip a leading shell prompt from the first line, if present.
   text = text
     .replace(/^PS [^>]*>\s*/, '')
     .replace(/^[A-Za-z]:\\[^>]*>\s*/, '')
     .replace(/^[>❯➜»]\s*/, '');
-  return text.trim();
+
+  // Remove the uniform left padding an input box adds to every row (dedent),
+  // then trim trailing whitespace per line and surrounding blank space.
+  const lines = text.split('\n');
+  const indents = lines.filter((l) => l.trim()).map((l) => (l.match(/^ */)?.[0].length ?? 0));
+  const dedent = indents.length ? Math.min(...indents) : 0;
+  return lines
+    .map((l) => l.slice(dedent).replace(/\s+$/, ''))
+    .join('\n')
+    .replace(/^\n+|\n+$/g, '')
+    .trim();
 }
