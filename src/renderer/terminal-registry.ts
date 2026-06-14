@@ -36,3 +36,27 @@ export function getTerminalEntry(id: string): TerminalEntry | undefined {
 export function getAllTerminals(): Terminal[] {
   return Array.from(registry.values()).map((e) => e.terminal);
 }
+
+/**
+ * Best-effort read of the text the user has typed on the current input line,
+ * used to seed the prompt composer. Reads the cursor row up to the caret and
+ * strips terminal chrome: box-drawing chars (AI-CLI input boxes) and a leading
+ * shell prompt (PowerShell / cmd / generic `>`/`❯`). Heuristic - returns '' if
+ * nothing meaningful is found.
+ */
+export function getCurrentInputLine(id: string): string {
+  const entry = registry.get(id);
+  if (!entry) return '';
+  const buf = entry.terminal.buffer.active;
+  const line = buf.getLine(buf.baseY + buf.cursorY);
+  if (!line) return '';
+  let text = line.translateToString(false, 0, buf.cursorX);
+  // Box-drawing / block chars -> spaces (Copilot/Claude input boxes).
+  text = text.replace(/[─-▟]/g, ' ').trimStart();
+  // Strip a leading shell prompt, if present.
+  text = text
+    .replace(/^PS [^>]*>\s*/, '')
+    .replace(/^[A-Za-z]:\\[^>]*>\s*/, '')
+    .replace(/^[>❯➜»]\s*/, '');
+  return text.trim();
+}

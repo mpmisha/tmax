@@ -21,7 +21,7 @@ import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from './types';
 import type { CopilotSessionSummary } from '../../shared/copilot-types';
 import type { DiffMode } from '../../shared/diff-types';
 import type { RepoWorktrees } from '../../shared/worktree-types';
-import { getAllTerminals, getTerminalEntry } from '../terminal-registry';
+import { getAllTerminals, getTerminalEntry, getCurrentInputLine } from '../terminal-registry';
 import { confirmDialog } from '../components/AppDialog';
 import { dropComposerDraft, updateComposerDrafts } from '../utils/prompt-composer';
 
@@ -3651,7 +3651,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   // ── Prompt composer actions ────────────────────────────────────────
   openPromptComposer: (terminalId: TerminalId) => {
-    set({ promptComposerRequest: terminalId });
+    // Seed the draft from the pane's current input line, but only when there's
+    // no draft yet (don't clobber an in-progress composition).
+    let drafts = get().composerDrafts;
+    if (!drafts[terminalId]) {
+      const input = getCurrentInputLine(terminalId);
+      if (input) drafts = updateComposerDrafts(drafts, terminalId, input);
+    }
+    set({ promptComposerRequest: terminalId, composerDrafts: drafts });
   },
   closePromptComposer: () => {
     set({ promptComposerRequest: null });
