@@ -410,24 +410,73 @@ function renderTimeline() {
 
   // When stacking by platform there are only 3-4 buckets so no top-N slicing
   // is needed. When stacking by release, cap at 5 for legend readability.
-  // Rank by *activity in the visible window* (sum of deltas, or last-first in
-  // cumulative mode — which is the same number). Sorting by `last.count`
-  // would always favor the oldest releases since they've had the longest to
-  // accumulate downloads, so newer releases (e.g. v1.9.x) could never crack
-  // the top 5 even when they're driving most of the current install volume.
-  // This also "just works" when the user drag-zooms into a sub-range.
-  const activity = (points) => {
+  // Rank by *activity in the visible window* (sum of deltas, or end-minus-
+  // baseline in cumulative mode). Sorting by `last.count` would always favor
+  // the oldest releases since they've had the longest to accumulate downloads,
+  // so newer releases could never crack the top 5 even when they're driving
+  // most of the current install volume. This also "just works" when the user
+  // drag-zooms into a sub-range.
+  //
+  // The baseline is the subtle part. Naively using `points[0].count` (the first
+  // in-window sample) breaks for a release that was *born inside the window*:
+  // the newest version is published, races to ~1k downloads between two
+  // snapshots, then plateaus — so its first in-window sample is already huge and
+  // `last - first` ≈ 0. It then loses every top-5 slot despite having the most
+  // downloads (this is exactly why v1.11.0 vanished from the chart). To fix it
+  // we compute the baseline from the *full, unbucketed, unzoomed* history:
+  const fullSeries = new Map(); // key -> [{t, count}] across ALL history
+  for (const snap of timelineHistory) {
+    const t = new Date(snap.t).getTime();
+    const perKey = new Map();
+    for (const [tag, assets] of Object.entries(snap.releases)) {
+      for (const [name, n] of Object.entries(assets)) {
+        if (IS_META(name)) continue;
+        if (IS_UPDATE(name)) continue;
+        const key = timelineStack === 'platform' ? platformOf(name) : tag;
+        perKey.set(key, (perKey.get(key) || 0) + n);
+      }
+    }
+    for (const [key, count] of perKey) {
+      if (!fullSeries.has(key)) fullSeries.set(key, []);
+      fullSeries.get(key).push({ t, count });
+    }
+  }
+  for (const pts of fullSeries.values()) pts.sort((a, b) => a.t - b.t);
+  const globalFirstT = fullSeries.size
+    ? Math.min(...Array.from(fullSeries.values(), (pts) => pts[0].t))
+    : 0;
+  const windowLeft = timelineZoom ? timelineZoom.start : -Infinity;
+  // baseline = the key's cumulative count at the last snapshot *before* the
+  // window opened. If there is none AND the key debuted after sampling began,
+  // it genuinely started from 0 inside our data, so its whole in-window count is
+  // real activity. If it had no pre-window snapshot but was already present in
+  // the very first snapshot ever, we can't see its pre-history — fall back to
+  // its first in-window value (original behaviour; avoids crediting an ancient
+  // release with downloads it accrued before sampling started).
+  const baselineFor = (key, points) => {
+    const full = fullSeries.get(key);
+    if (full) {
+      let pre = null;
+      for (const p of full) {
+        if (p.t < windowLeft) pre = p.count; else break;
+      }
+      if (pre !== null) return pre;
+      if (full[0].t > globalFirstT) return 0; // debuted during sampling -> 0
+    }
+    return points[0].count;
+  };
+  const activity = (key, points) => {
     if (!points.length) return 0;
     if (timelineMode === 'delta') {
       let s = 0;
       for (const p of points) s += p.count;
       return s;
     }
-    // cumulative: activity within window is end - start
-    return Math.max(0, points[points.length - 1].count - points[0].count);
+    // cumulative: activity within window is end - baseline
+    return Math.max(0, points[points.length - 1].count - baselineFor(key, points));
   };
   const ranked = Array.from(series.entries())
-    .sort(([, a], [, b]) => activity(b) - activity(a))
+    .sort(([ka, a], [kb, b]) => activity(kb, b) - activity(ka, a))
     .slice(0, timelineStack === 'platform' ? 10 : 5);
 
   const pad = { top: 20, right: 16, bottom: 80, left: 40 };
